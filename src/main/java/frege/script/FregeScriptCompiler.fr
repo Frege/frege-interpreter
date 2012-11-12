@@ -84,7 +84,7 @@ standardOptions exld1 = do
             packages = Nil,
             namespaces = Nil,
             genEnv = [],
-            -- env = [],
+            javaEnv = Nil,
             locals = Nil,
             typEnv = []
         }
