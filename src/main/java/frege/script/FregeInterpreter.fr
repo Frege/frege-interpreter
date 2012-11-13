@@ -127,8 +127,8 @@ getValue javaSource varName = do
  * [requires] the script must be an expression
  * [returns] the result of the @show@ call, of course, a @String@
 -}              
-private invokeShow script predefs varName state symbol = do
-  let showScript = buildShowScript script state symbol
+private invokeShow predefs varName state symbol = do
+  let showScript = buildShowScript varName state symbol
   res <- eval showScript predefs
   case res of
     Left err -> return $ Left err
@@ -141,9 +141,9 @@ private invokeShow script predefs varName state symbol = do
  *           it is "executed" and then @show@ is applied.
  * [requires] the script must represent an expression
 -}    
-buildShowScript script state symbol = 
-  if isIO state symbol then "show $ ST.performUnsafe (" ++ script ++ ")" 
-  else "show (" ++ script ++ ")"
+buildShowScript varName state symbol = 
+  if isIO state symbol then "show . ST.performUnsafe $ " ++ varName
+  else "show $ " ++ varName
   
 native contextLoader frege.script.JavaUtils.getContextClassLoader :: () -> IO URLClassLoader
 
@@ -223,29 +223,27 @@ executeCommand script predefs = do
     
     -- An expression
     Right (EvalResult{valueInfo=Just valueInfo,state=state}) -> do
+      let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
       case valueInfo.showableValue of
           --Not a function, so can be displayed
           Just showableValue ->
             --a string, just returns it's value
             if isString state valueInfo.symbol then do
               let value = Object.toString $ asObject showableValue
-              let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
               return • Right $ (valueInfo.name ++ " = " ++ value, newScript)
             --Not a string, call "show"  
             else do
-              showRes <- invokeShow script predefs valueInfo.name state valueInfo.symbol
+              showRes <- invokeShow newScript valueInfo.name state valueInfo.symbol
               case showRes of
                 Left err -> do
                   return • Left $ err
                 Right val -> do
                   let value = Object.toString $ asObject val
-                  let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
                   return • Right $ (valueInfo.name ++ " = " ++ value, newScript)
           
           -- A function, just return it's type information        
           otherwise -> do
             let symbolType = getSymbolType valueInfo.symbol state
-            let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
             return • Right $ (valueInfo.name ++ " :: " ++ symbolType, newScript)
             
     Left err -> return $ Left err
