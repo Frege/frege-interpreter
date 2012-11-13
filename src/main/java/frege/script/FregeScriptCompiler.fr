@@ -97,23 +97,25 @@ runfregec !src !predefs !opts !pw loader steps moduleName = do
 
 data ScriptType = Module | Definitions | Expression
 
+derive Show ScriptType
+
 {-returns true if the script is a list of definitions, false if the script
   is an expression or a module-}        
-findScriptType :: StG ScriptType   
-findScriptType = do
+findScriptType :: String -> StG ScriptType   
+findScriptType predefs = do
   g <- getST
   runpass (lexPass,         "lexical analysis                      ", postTrue)
   g <- getST
-  if g.errors == 0 then scriptTypePass else return ScriptType.Module
+  if g.errors == 0 then scriptTypePass predefs else return ScriptType.Module
   
-scriptTypePass = do
+scriptTypePass predefs = do
   g <- getST
   let tokens = (filter Token.noComment g.sub.toks.toList)
   case tokens of
     [] -> return ScriptType.Module 
     (Token{tokid=PACKAGE}) : _ -> return ScriptType.Module 
     _ -> do
-      isExpr <- isExpressionPass
+      isExpr <- isExpressionPass predefs
       return (if isExpr 
         then ScriptType.Expression 
         else ScriptType.Definitions)
@@ -141,7 +143,7 @@ runpass (pass,description,post) = do
 run predefs loader steps moduleName = do
     g <- getST
     p <- doio $ stdoutPrinter
-    scriptType <- findScriptType
+    scriptType <- findScriptType predefs
     newLine <- doio newLine
     let variableName = getVariableName scriptType (g.options.source ++ newLine ++ predefs)
     let source = buildScript g.options.source scriptType predefs variableName newLine moduleName
@@ -235,7 +237,8 @@ scanOps getop =
         let opts   = global.options
         passCS (CharSeq.fromString opts.source) getop 
 
-compile :: String -> [String] -> [String] -> PrintWriter -> PrintWriter -> URLClassLoader -> String -> String -> IO (String, Global)
+compile :: String -> [String] -> [String] -> PrintWriter -> 
+  PrintWriter -> URLClassLoader -> String -> String -> IO (String, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
   let flags = fold U.setFlag 0 [WITHCP, IDE]
   let steps = (passes jw moduleName)
@@ -305,19 +308,25 @@ iparsePass packageName = do
         Nothing -> stio ("tokens", g.sub.toks.length)
         
 
-isExpressionPass :: StG Bool
-isExpressionPass = do
+isExpressionPass :: String -> StG Bool
+isExpressionPass predefs = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    let g0 = g.{sub <- SubSt.{stderr=pw}}
-    changeST $ const g0
-    let interpreterTokens = interpretToken : g.sub.toks.toList
-    result <- Parse.pass interpreterTokens
+    newLine <- doio $ newLine
+    let decl src = variableDeclScript "f" src --A declaration with some name
+    let changeSource src = intercalate newLine ["module T where", predefs, decl src]
+    changeST Global.{sub <- SubSt.{stderr=pw}, 
+      options <- Options.{source <- changeSource}}
+    runpass (lexPass,         "lexical analysis                      ", postTrue)
     g <- getST
-    case result of
-        Just (Program.Expression e) -> stio $ g.errors == 0
-        otherwise -> stio false
+    if g.errors != 0 then
+      return false
+    else do
+      let interpreterTokens = g.sub.toks.toList
+      result <- Parse.pass interpreterTokens
+      g <- getST
+      return $ g.errors == 0
 
   
 data JString = pure native String where

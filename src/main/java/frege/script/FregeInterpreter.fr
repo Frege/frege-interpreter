@@ -229,7 +229,7 @@ executeCommand script predefs = do
             --a string, just returns it's value
             if isString state valueInfo.symbol then do
               let value = Object.toString $ asObject showableValue
-              let newScript = predefs ++ newLine ++ valueInfo.name ++ " = " ++ script
+              let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
               return • Right $ (valueInfo.name ++ " = " ++ value, newScript)
             --Not a string, call "show"  
             else do
@@ -239,13 +239,13 @@ executeCommand script predefs = do
                   return • Left $ err
                 Right val -> do
                   let value = Object.toString $ asObject val
-                  let newScript = predefs ++ newLine ++ valueInfo.name ++ " = " ++ script
+                  let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
                   return • Right $ (valueInfo.name ++ " = " ++ value, newScript)
           
           -- A function, just return it's type information        
           otherwise -> do
             let symbolType = getSymbolType valueInfo.symbol state
-            let newScript = predefs ++ newLine ++ valueInfo.name ++ " = " ++ script
+            let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
             return • Right $ (valueInfo.name ++ " :: " ++ symbolType, newScript)
             
     Left err -> return $ Left err
