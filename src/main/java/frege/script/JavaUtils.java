@@ -1,8 +1,13 @@
 package frege.script;
 
 import java.net.URLClassLoader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import javacompilation.MemoryClassLoader;
 import javacompilation.MemoryJavaCompiler;
 
 import org.eclipse.jdt.core.compiler.CategorizedProblem;
@@ -11,6 +16,8 @@ import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
 
 import frege.prelude.PreludeBase.TEither;
+import frege.prelude.PreludeBase.TList;
+import frege.prelude.PreludeBase.TList.DCons;
 import frege.rt.Box;
 import frege.rt.FV;
 import frege.rt.Lazy;
@@ -29,7 +36,7 @@ public class JavaUtils {
 	}
 	
 	/**
-	 * Compiles the Java source code and the fetches the value of the field
+	 * Fetches the value of a variable
 	 * represented by the "variableName"
 	 * @param javaSource the Java source code
 	 * @param className the name of the Java class
@@ -40,11 +47,25 @@ public class JavaUtils {
 	public static TEither execute(final String javaSource, final String className,
 			final String variableName, 
 			final ClassLoader loader) {
+		try {
+			final Class<?> clazz = loader.loadClass(className);
+			@SuppressWarnings({ "unchecked" })
+			final Lazy<FV> result = ((Lazy<FV>)
+					clazz.getDeclaredField(variableName).
+					get(null))._e();
+			return TEither.DRight.mk(result);
+		} catch (final Exception e) {
+			return TEither.DLeft.mk(Box.mk(e.toString()));
+		}
+	}
+	
+	public static TEither compile(final String source, final String className,
+			final ClassLoader loader) {
 		final CompilerOptions options = getCompilerOptions();
 		final MemoryJavaCompiler javac = new MemoryJavaCompiler(options);
 		final StringBuilder msgBuilder = new StringBuilder();
-		final List<CompilationResult> javacResults = javac.compile("FregeScript", javaSource, loader);
-		for (final CompilationResult res : javacResults) {
+		final MemoryClassLoader memLoader = javac.compile(source, className, loader);
+		for (final CompilationResult res : memLoader.getResults()) {
 			if (res.getProblems() != null) {
 				for (final CategorizedProblem problem : res.getProblems()) {
 					if (problem.isError()) {
@@ -55,20 +76,18 @@ public class JavaUtils {
 			}
 		}
 		if (msgBuilder.toString().isEmpty()) {
-			try {
-				final Class<?> clazz = javac.getClassLoader(
-						loader, javacResults).loadClass(className);
-				@SuppressWarnings({ "unchecked" })
-				final Lazy<FV> result = ((Lazy<FV>)
-						clazz.getDeclaredField(variableName).
-						get(null))._e();
-				return TEither.DRight.mk(result);
-			} catch (final Exception e) {
-				return TEither.DLeft.mk(Box.mk(e.toString()));
-			}
+			return TEither.DRight.mk(Box.mk(memLoader));
 		} else {
 			return TEither.DLeft.mk(Box.mk(msgBuilder.toString()));
 		}
+	}
+	
+	public static TEither compile(final Lazy<FV> source, final Lazy<FV> className,
+			final Lazy<FV> loader) {
+		final String src = fromFV(source._e());
+		final String classNm = fromFV(className._e());
+		final ClassLoader clsLoader = fromFV(loader._e());
+		return compile(src, classNm, clsLoader);
 	}
 	
 	/*
@@ -84,5 +103,58 @@ public class JavaUtils {
 		options.targetJDK = sourceLevel;
 		return options;
 	}
-
+	
+	public static <T> TList fromJavaList(final List<T> jlist) {
+		final TList nil = TList.DList.mk();
+		TList tail = nil;
+		final List<T> reversed = reverse(jlist);
+		for (final T e: reversed) {
+			final Box<T> fregeVal = Box.mk(e);
+			tail = TList.DCons.mk(fregeVal, tail);
+		}
+		return tail;
+	}
+	
+	public static <T> List<T> reverse(final List<T> list) {
+		final List<T> reversed = new ArrayList<T>();
+		for (final T elem: list) {
+			reversed.add(0, elem);
+		}
+		return Collections.unmodifiableList(reversed);
+	}
+	
+	private static List<FV> toJavaListLoop(final TList list, final List<FV> acc) {
+		if (list.constructor() == 0) { //Nil
+			return acc;
+		} else {
+			final DCons cons = list._Cons();
+			final FV elem = cons.mem1._e();
+			acc.add(elem);
+			return toJavaListLoop((TList)cons.mem2._e(), acc);
+		}
+	}
+	
+	public static List<FV> toJavaList(final TList list) {
+		final List<FV> jlist = toJavaListLoop(list, new ArrayList<FV>());
+		return Collections.unmodifiableList(jlist);
+	}
+	
+	public static boolean isLeft(final TEither either) {
+		return either.constructor() == 0;
+	}
+	
+	public static FV getLeft(final TEither either) {
+		final TEither.DLeft left = (TEither.DLeft) either._Left()._e();
+		return left.mem1._e();
+	}
+	
+	public static FV getRight(final TEither either) {
+		final TEither.DRight right = (TEither.DRight) either._Right()._e();
+		return right.mem1._e();
+	}
+	
+	public static <T> T fromFV(final FV fv) {
+		return Box.<T>box(fv).j;
+	}
+	
 }

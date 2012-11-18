@@ -8,7 +8,7 @@ import frege.compiler.Main(stdOptions, stdPrinter, stdoutPrinter, format,
   make, parsePass, postTrue, getOperators)
 import frege.compiler.GUtil
 import frege.compiler.BaseTypes(Pos)
-
+import frege.lib.PP
 import Data.List
 import Data.Maybe
 import frege.List as FL (Tree)
@@ -40,13 +40,12 @@ createopts sp flags dir path prefix = stdOptions.{
                                 flags, dir,
                                 path = path,
                                 prefix}
-standardOptions exld1 = do
+standardOptions exld = do
     cache    <- IORef.new Nil      -- start out with empty cache
     --exld     <- U.theClassLoader stdOptions
-    let exld = Right exld1
     eprinter <- stdPrinter stderr
     oprinter <- stdoutPrinter
-    either throw (global cache eprinter oprinter) exld
+    global cache eprinter oprinter exld
   where
     global cache eprinter oprinter loader = return Global {
             options = stdOptions,
@@ -184,7 +183,8 @@ findUnusedVariableName script = "res" ++ show unusedVarNum where
      
 openPrinter pw = do
     g <- getST
-    changeST Global.{gen <- GenSt.{printer=pw}}
+    printer <- doio $ StringWriter.printer pw
+    changeST Global.{gen <- GenSt.{printer=printer}}
     stio ("file", 1)
 
 {--
@@ -198,7 +198,7 @@ openPrinter pw = do
 passes jw packageName = [
     -- function       description                            post condition
     (lexPass,         "lexical analysis                      ", postTrue),
-    (iparsePass packageName, "syntax  analysis                      ", 
+    (iparsePass,      "syntax  analysis                      ", 
        postTrue),
     (P1.pass,         "collecting definitions                ", P1.post),
     (P2.pass,         "symbol table initialization and import", P2.post),
@@ -218,7 +218,27 @@ passes jw packageName = [
     (openPrinter jw,     "open file                             ", postTrue),
     (GM.pass,         "generate meta data                    ", GM.post),   -- none
     (G7.pass,         "generate java code                    ", G7.post),  -- TRACEG
+    (javacPass jw,           "run java compiler                     ", postTrue)
     ]
+    
+native javac JavaUtils.compile :: String -> String -> ClassLoader -> 
+  IO (Either String URLClassLoader) 
+
+javacPass :: StringWriter -> StG (String, Int)
+javacPass src = do
+  g <- getST
+  let !packName = g.sub.thisPack.unpack g
+      !loader = g.sub.loader
+  !jsrc <- doio $ src.toString
+  res <- doio $ javac jsrc packName loader
+  case res of
+    Left err -> do
+            U.error Position.null (TEXT err)
+            return ("javac", 1)
+    Right loader -> do
+      changeST Global.{sub <- SubSt.{loader=loader}} --Classloader with compiled class
+      return ("javac", 0)
+  
     
 lexPass = do
     changeST Global.{sub <- SubSt.{toks = Array.fromList []}
@@ -238,7 +258,7 @@ scanOps getop =
         passCS (CharSeq.fromString opts.source) getop 
 
 compile :: String -> [String] -> [String] -> PrintWriter -> 
-  PrintWriter -> URLClassLoader -> String -> String -> IO (String, Global)
+  StringWriter -> URLClassLoader -> String -> String -> IO (String, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
   let flags = fold U.setFlag 0 [WITHCP, IDE]
   let steps = (passes jw moduleName)
@@ -293,13 +313,13 @@ existsSymbolWithName g _ _ = false
 
 interpretToken = (Token INTERPRET "INTERPRET" 0 0 0)
 
-iparsePass packageName = do
+iparsePass = do
     g       <- getST
     let tokens = (filter Token.noComment g.sub.toks.toList)
     result <- Parse.pass tokens
     case result of
         Just (Program.Module (packname, defs, doc)) -> do
-            changeST Global.{sub <-  SubSt.{thisPack = Pack.new packageName}}
+            changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
             let ds = nubFront defs isDefined
             changeST Global.{sub <- (SubSt.{definitions = ds}
                                      • SubSt.{packageDoc = Nothing})}
