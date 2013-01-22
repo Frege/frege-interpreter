@@ -13,7 +13,7 @@ import Data.List
 import Data.Maybe
 import frege.List as FL (Tree)
 import frege.IO(`<<`, stdout, stderr, File, OutputStreamWriter, PrintWriter, 
-  Closeable, Appendable, ClassLoader, URLClassLoader, URLArr, StringWriter)
+  Closeable, Appendable, ClassLoader, StringWriter)
 import frege.compiler.Nice (text, msgdoc)
 import frege.compiler.Classtools  as CT(FregePackage)
 import frege.compiler.Data
@@ -30,9 +30,10 @@ import frege.compiler.Transform   as P7()
 import frege.compiler.TCUtil      as TCU()
 import frege.compiler.Typecheck   as TC()
 import frege.compiler.GenMeta     as GM()
-import frege.compiler.GenUtil     as GU()
+import frege.compiler.gen.Util    as GU()
 import frege.compiler.GenJava7    as G7()
 import frege.compiler.EclipseUtil as EU()
+import frege.java.Net
 
 --- utility function to create 'Options' data structure
 createopts sp flags dir path prefix = stdOptions.{
@@ -40,6 +41,7 @@ createopts sp flags dir path prefix = stdOptions.{
                                 flags, dir,
                                 path = path,
                                 prefix}
+                                
 standardOptions exld = do
     cache    <- IORef.new Nil      -- start out with empty cache
     --exld     <- U.theClassLoader stdOptions
@@ -67,17 +69,21 @@ standardOptions exld = do
                 toExport = []
             },
             gen = Gen {
-                printer = eprinter,
+                printer = oprinter,
                 tunique = 0,
                 runique = 0,
                 sunique = 0,
                 xunique = 1,
+                kunique = 1,
                 tTree = Nil,
                 rTree = Nil,
                 sTree = Nil,
-                xTree = (Nil).insert GU.defEA 0,   -- so that 0 never indexes valid expression
+                xTree = Nil .insert GU.defEA 0,        -- so that 0 never indexes valid expression
+                kTree = Nil .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
                 consts = Nil,
                 lambdas = Nil,
+                syminfo = Nil,
+                jimport = Nil,
             },
             unique = 1,
             packages = Nil,
@@ -260,7 +266,7 @@ scanOps getop =
 compile :: String -> [String] -> [String] -> PrintWriter -> 
   StringWriter -> URLClassLoader -> String -> String -> IO (String, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
-  let flags = fold U.setFlag 0 [WITHCP, IDE]
+  let flags = Flags.fromList [WITHCP, IDE]
   let steps = (passes jw moduleName)
   runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName
   
@@ -275,7 +281,7 @@ isDefined defs (_@DrvDcl{clas=clas1, typ=typ1}) = isJust . find matching $ defs 
   matching _ = false-}
 isDefined defs (_@AnnDcl{name=x}) = isJust . find (matching x) $ defs
 isDefined defs (_@NatDcl{name=name1, typ=typ1}) = isJust . find (matching name1) $ defs
-isDefined defs (_@FunDcl{name=x}) = isJust . find (matching x) $ defs
+isDefined defs (_@FunDcl{name=x,pats=pats}) = null pats && (isJust . find (matching x) $ defs)
 isDefined defs (_@DatDcl{name=x,defs=ds}) = isJust . find (matching x) $ defs
 isDefined defs (_@JavDcl{name=x}) = isJust . find (matching x) $ defs
 isDefined _ _ = false
@@ -284,7 +290,7 @@ matching x (_@TypDcl{name=y}) = x == y
 matching x (_@ClaDcl{name=y}) = x == y 
 matching x (_@AnnDcl{name=y}) = x == y
 matching x (_@NatDcl{name=name2, typ=typ2}) = name2 == x
-matching x (_@FunDcl{name=y}) = x == y 
+matching x (_@FunDcl{name=y,pats=pats}) = null pats && x == y
 matching x (_@DatDcl{name=y}) = x == y
 matching x (_@JavDcl{name=y}) = x == y 
 matching _ _ = false
@@ -343,14 +349,12 @@ isExpressionPass predefs = do
     if g.errors != 0 then
       return false
     else do
-      let interpreterTokens = g.sub.toks.toList
-      result <- Parse.pass interpreterTokens
+      let tokens = (filter Token.noComment g.sub.toks.toList)
+      result <- Parse.pass tokens
       g <- getST
       return $ g.errors == 0
 
-  
-data JString = pure native String where
-  pure native contains :: String -> CharSeq Immutable -> Bool
+ 
 
 nubFront [] _ = []
 nubFront (x:xs) f = if (f xs x) then nubFront xs f else x : nubFront xs f

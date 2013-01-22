@@ -8,6 +8,7 @@ import frege.script.FregeScriptCompiler
 import frege.compiler.Data
 import Data.List
 import frege.Version
+import frege.java.Net
 
 type JavaSource = String
 type ErrorMessage = String
@@ -57,7 +58,7 @@ eval script predefs moduleName classLoader = do
       let symbol = unJust $ lookupSymbol state var
       --Not a function, so can be displayed
       if isShowable state symbol then do
-        v <- executeClass jsrc moduleName var state.sub.loader.classLoader
+        v <- executeClass jsrc moduleName var state.sub.loader
         case v of
           Left err -> return $ Left err
           Right value -> do
@@ -201,7 +202,7 @@ executeCommand :: Script -> Script -> String -> URLClassLoader -> IO (Either Err
 executeCommand ":version" predefs _ _ = return $ Right (version, predefs)
 
 --lists the identifiers along with the types from the second script
-executeCommand ":l" predefs moduleName classLoader = do
+executeCommand (_~#^:[lL]#) predefs moduleName classLoader = do
   res <- compileTerm predefs "" moduleName classLoader
   newLine <- newLine
   case res of
@@ -210,7 +211,7 @@ executeCommand ":l" predefs moduleName classLoader = do
     _ -> return $ Right ("", predefs)
 
 --returns the type of an expression
-executeCommand (m~#^:t.*?\s+(.*)#) predefs moduleName classLoader = 
+executeCommand (m~#^:[tT].*?\s+(.*)#) predefs moduleName classLoader = 
   case m.group 1 of
     Just expr -> do
       res <- compileTerm expr predefs moduleName classLoader

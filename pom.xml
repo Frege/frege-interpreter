@@ -1,14 +1,14 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-	<modelVersion>4.0.0</modelVersion>
-	<groupId>frege</groupId>
-	<artifactId>frege-scripting</artifactId>
-	<packaging>jar</packaging>
-	<version>1.0</version>
-	<name>frege-scripting</name>
-	<url>https://github.com/Frege/frege-scripting</url>
-	<build>
-	<pluginManagement>
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>frege</groupId>
+  <artifactId>frege-scripting</artifactId>
+  <packaging>jar</packaging>
+  <version>1.0-SNAPSHOT</version>
+  <name>frege-scripting</name>
+  <url>https://github.com/Frege/frege-scripting</url>
+  <build>
+  <pluginManagement>
       <plugins>
         <!--For Eclipse m2e -->
         <plugin>
@@ -37,72 +37,72 @@
         </plugin>
       </plugins>
     </pluginManagement>
-		<plugins>
-			<plugin>
-				<artifactId>maven-antrun-plugin</artifactId>
-				<version>1.7</version>
-				<executions>
-					<execution>
-						<phase>generate-sources</phase>
-						<configuration>
-							<target>
-								<property name="compile_classpath" refid="maven.compile.classpath" />
-								<property name="outputDir" value="${project.build.outputDirectory}" />
-								<property name="sourceDir" value="${project.build.sourceDirectory}" />
-								<property name="fregec" value="${frege:frege-java6:jar}" />
-								<path id="frege.sources">
-									<fileset dir="${sourceDir}/frege/script">
-										<include name="FregeScriptCompiler.fr" />
-										<include name="FregeInterpreter.fr" />
-									</fileset>
-								</path>
-								<pathconvert pathsep=" " property="frege.sources.list"
-									refid="frege.sources" />
-								<exec executable="java" failonerror="true">
-									<arg value="-Xss1m" />
-									<arg value="-Dfrege.javac=javac -source 1.6 -target 1.6"/>
-									<arg value="-classpath" />
-									<arg value="${fregec}" />
-									<arg value="frege.compiler.Main" />
-									<arg value="-d" />
-									<arg path="${outputDir}" />
-									<arg line="${frege.sources.list}" />
-								</exec>
-							</target>
-						</configuration>
-						<goals>
-							<goal>run</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-compiler-plugin</artifactId>
-				<version>2.5.1</version>
-				<configuration>
-					<source>1.6</source>
-					<target>1.6</target>
-				</configuration>
-			</plugin>
-		</plugins>
-	</build>
-	<dependencies>
-		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
-			<version>3.8.1</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>frege</groupId>
-			<artifactId>frege-java6</artifactId>
-			<version>3.20.48</version>
-		</dependency>
-		<dependency>
-			<groupId>org.eclipse.jdt.core.compiler</groupId>
-			<artifactId>ecj</artifactId>
-			<version>3.7</version>
-		</dependency>
-	</dependencies>
+    <plugins>
+      <plugin>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>1.7</version>
+        <executions>
+          <execution>
+            <phase>generate-sources</phase>
+            <configuration>
+              <target>
+                <property name="compile_classpath" refid="maven.compile.classpath" />
+                <property name="outputDir" value="${project.build.outputDirectory}" />
+                <property name="sourceDir" value="${project.build.sourceDirectory}" />
+                <property name="fregec" value="${frege:frege:jar}" />
+                <path id="frege.sources">
+                  <fileset dir="${sourceDir}/frege/script">
+                    <include name="FregeScriptCompiler.fr" />
+                    <include name="FregeInterpreter.fr" />
+                  </fileset>
+                </path>
+                <pathconvert pathsep=" " property="frege.sources.list"
+                  refid="frege.sources" />
+                <exec executable="java" failonerror="true">
+                  <arg value="-Xss1m" />
+                  <arg value="-Dfrege.javac=javac"/>
+                  <arg value="-classpath" />
+                  <arg value="${fregec}" />
+                  <arg value="frege.compiler.Main" />
+                  <arg value="-d" />
+                  <arg path="${outputDir}" />
+                  <arg line="${frege.sources.list}" />
+                </exec>
+              </target>
+            </configuration>
+            <goals>
+              <goal>run</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>2.5.1</version>
+        <configuration>
+          <source>1.7</source>
+          <target>1.7</target>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+  <dependencies>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>3.8.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>frege</groupId>
+      <artifactId>frege</artifactId>
+      <version>3.21.33-g5e7b72f</version>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jdt.core.compiler</groupId>
+      <artifactId>ecj</artifactId>
+      <version>3.7.2</version>
+    </dependency>
+  </dependencies>
 </project>
