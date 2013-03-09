@@ -295,6 +295,15 @@ matching x (_@DatDcl{name=y}) = x == y
 matching x (_@JavDcl{name=y}) = x == y 
 matching _ _ = false
 
+groupFunDcl ds = groupBy f ds where
+  f (fun1@FunDcl{name=name1}) (fun2@FunDcl{name=name2}) = name1 == name2
+  f _ _ = false
+  
+isFunDefined decls ((_@FunDcl{name=x}):_) = isJust . find (pred x) $ map head decls where
+  pred x (_@FunDcl{name=y}) = x == y
+  pred x _ = false
+isFunDefined _ _ = false
+
 exprType :: Global -> String -> String    
 exprType g compilationId = let symbols = (EU.symbols g.thisTab) in 
   case (find (existsSymbolWithName g compilationId) symbols) of
@@ -327,7 +336,9 @@ iparsePass = do
         Just (Program.Module (packname, defs, doc)) -> do
             changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
             let ds = nubFront defs isDefined
-            changeST Global.{sub <- (SubSt.{definitions = ds}
+                gds = groupFunDcl ds
+                uniqds = concat $ nubFront gds isFunDefined
+            changeST Global.{sub <- (SubSt.{definitions = uniqds}
                                      • SubSt.{packageDoc = Nothing})}
             stio ("tokens",  g.sub.toks.length)
         Just _ -> error "FATAL: Expected module"

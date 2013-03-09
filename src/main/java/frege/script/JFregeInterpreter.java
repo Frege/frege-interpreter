@@ -35,7 +35,6 @@ public class JFregeInterpreter {
   public static JInterpreterResult interpret(final String term, 
       final String script, final String moduleName, 
       final URLClassLoader classLoader) throws Exception {
-    final String newScript;
     final JInterpreterResult result;
     final Func1 scriptResultIO = (Func1) FregeInterpreter.executeCommand(
         term, Delayed.delayed(script), Delayed.delayed(moduleName), 
@@ -46,19 +45,13 @@ public class JFregeInterpreter {
       throw new Exception(errorMessage);
     } else {
       final TTuple2 res = (TTuple2) getRight(scriptResultEither);
-      final Object value;
-      if (res.mem1 instanceof Lazy) {
-        value = ((Lazy) res.mem1).forced();
-      } else {
-        value = res.mem1;
-      }
-      result = new JInterpreterResult(
-        value.toString(), 
-        ((Lazy)res.mem2).forced().toString());
+      final String scriptResult = forceLazy(res.mem1).toString();
+      final String newScript = forceLazy(res.mem2).toString();
+      result = new JInterpreterResult(scriptResult, newScript);
     }
     return result;
   }
-  
+
   public static URLClassLoader compileScripts(final List<String> scripts,
       final URLClassLoader loader) throws Exception {
     final TList scriptsList = fromJavaList(scripts);
@@ -70,6 +63,7 @@ public class JFregeInterpreter {
       throw new Exception(toJavaList(errors).toString());
     } else {
       final URLClassLoader newLoader = getRight(res);
+      System.out.println(newLoader);
       return newLoader;
     }
   }

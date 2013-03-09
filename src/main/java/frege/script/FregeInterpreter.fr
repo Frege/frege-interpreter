@@ -115,7 +115,7 @@ compileScripts :: [Script] -> URLClassLoader -> IO (Either [ErrorMessage] URLCla
 compileScripts [] loader = return $ Right loader
 compileScripts scripts classLoader = do
   let initial = return ([], classLoader)
-  let compilationResults = (foldl f initial scripts)
+  let compilationResults = (fold f initial scripts)
       f :: (IO ([Either ErrorMessage CompilationResult], URLClassLoader)) -> 
         Script -> (IO ([Either ErrorMessage CompilationResult], URLClassLoader))
       f sofar s = do
@@ -202,14 +202,14 @@ executeCommand :: Script -> Script -> String -> URLClassLoader -> IO (Either Err
 executeCommand ":version" predefs _ _ = return $ Right (version, predefs)
 
 --lists the identifiers along with the types from the second script
-executeCommand (_~#^:[lL]#) predefs moduleName classLoader = do
+executeCommand (_~#^:list#) predefs moduleName classLoader = do
   res <- compileTerm predefs "" moduleName classLoader
   newLine <- newLine
   case res of
     Right (CompilationResult{state=state}) -> 
-      return $ Right(intercalate newLine $ showSymbols state, predefs)
-    _ -> return $ Right ("", predefs)
-
+      return $ Right(intercalate newLine $ showSymbols state, "")
+    _ -> return $ Right ("", "")
+    
 --returns the type of an expression
 executeCommand (m~#^:[tT].*?\s+(.*)#) predefs moduleName classLoader = 
   case m.group 1 of
@@ -219,7 +219,7 @@ executeCommand (m~#^:[tT].*?\s+(.*)#) predefs moduleName classLoader =
         Right (CompilationResult{variableName=Just name,state=state}) -> do
           let symbol = unJust $ lookupSymbol state name
           let typ = getSymbolType symbol state
-          return $ Right (typ, predefs)
+          return $ Right (typ, "")
         Right _ -> return $ Left "Not an expression"
         Left err -> return $ Left err
     Nothing -> return $ Left "Expected an expression"
@@ -234,11 +234,11 @@ executeCommand script predefs moduleName classLoader = do
   case res of
     -- A set of Definitions
     Right (EvalResult{valueInfo=Nothing,state=state}) -> 
-      return $ Right ("", predefs ++ newLine ++ script)
+      return $ Right ("", script)
     
     -- An expression
     Right (EvalResult{valueInfo=Just valueInfo,state=state}) -> do
-      let newScript = predefs ++ newLine ++ (variableDeclScript valueInfo.name script)
+      let newScript = variableDeclScript valueInfo.name script
       case valueInfo.showableValue of
           --Not a function, so can be displayed
           Just showableValue ->
@@ -248,7 +248,7 @@ executeCommand script predefs moduleName classLoader = do
               return • Right $ (valueInfo.name ++ " = " ++ value, newScript)
             --Not a string, call "show"  
             else do
-              showRes <- invokeShow newScript valueInfo.name moduleName state 
+              showRes <- invokeShow (predefs ++ newLine ++ newScript) valueInfo.name moduleName state 
                 valueInfo.symbol classLoader
               case showRes of
                 Left err -> do
