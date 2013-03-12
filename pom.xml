@@ -97,7 +97,7 @@
     <dependency>
       <groupId>frege</groupId>
       <artifactId>frege</artifactId>
-      <version>3.21.33-g5e7b72f</version>
+      <version>3.21.107-g4bd09eb</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jdt.core.compiler</groupId>

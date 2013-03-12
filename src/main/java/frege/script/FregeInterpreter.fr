@@ -3,7 +3,6 @@
 -}
 module frege.script.FregeInterpreter where
 
-import frege.IO
 import frege.script.FregeScriptCompiler
 import frege.compiler.Data
 import Data.List
@@ -60,7 +59,7 @@ eval script predefs moduleName classLoader = do
       if isShowable state symbol then do
         v <- executeClass jsrc moduleName var state.sub.loader
         case v of
-          Left err -> return $ Left err
+          Left err -> return $ Left err.getMessage
           Right value -> do
             let valueInfo = ValueInfo{name=var, 
                                       showableValue=Just value, 
@@ -171,7 +170,7 @@ buildShowScript varName state symbol =
  *           the compilation error message
 -}
 native executeClass frege.script.JavaUtils.execute :: 
-  JavaSource -> String -> String -> ClassLoader -> IO (Either ErrorMessage a)
+  JavaSource -> String -> String -> ClassLoader -> IO (Either ScriptException a)
 
 {--
  * A convenience function combining compilation and evaluation of the first

@@ -63,7 +63,6 @@ public class JFregeInterpreter {
       throw new Exception(toJavaList(errors).toString());
     } else {
       final URLClassLoader newLoader = getRight(res);
-      System.out.println(newLoader);
       return newLoader;
     }
   }

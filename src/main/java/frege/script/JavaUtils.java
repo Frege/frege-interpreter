@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
 
 import javacompilation.MemoryClassLoader;
 import javacompilation.MemoryJavaCompiler;
@@ -43,21 +44,21 @@ public class JavaUtils {
      * @param loader the class loader
      * @return either an error message or the value of the variable
      */
-    public static TEither execute(final String javaSource, final String className,
+    public static Object execute(final String javaSource, final String className,
 				  final String variableName, 
-				  final ClassLoader loader) {
+				  final ClassLoader loader) throws ScriptException {
 	try {
 	    final Class<?> clazz = loader.loadClass(className);
-	    return TEither.DRight.mk(clazz.getDeclaredField(variableName).
-				     get(null));
+	    return clazz.getDeclaredField(variableName).
+				     get(null);
 	} catch (final Throwable e) { //Catch Frege runtime errors
-	    return TEither.DLeft.mk(e.getCause() == null ? e.getMessage()
-				    : e.getCause().getMessage());
+	    throw (e.getCause() == null ? new ScriptException(e)
+		   : new ScriptException(e.getCause()));
 	}
     }
   
-    public static TEither compile(final String source, final String className,
-				  final ClassLoader loader) {
+    public static ClassLoader compile(final String source, final String className,
+				  final ClassLoader loader) throws ScriptException {
 	final CompilerOptions options = getCompilerOptions();
 	final MemoryJavaCompiler javac = new MemoryJavaCompiler(options);
 	final StringBuilder msgBuilder = new StringBuilder();
@@ -73,14 +74,14 @@ public class JavaUtils {
 	    }
 	}
 	if (msgBuilder.toString().isEmpty()) {
-	    return TEither.DRight.mk(Delayed.delayed(memLoader));
+	    return memLoader;
 	} else {
-	    return TEither.DLeft.mk(Delayed.delayed(msgBuilder.toString()));
+	    throw new ScriptException(msgBuilder.toString());
 	}
     }
   
-    public static TEither compile(final Lazy source, final Lazy className,
-				  final Lazy loader) {
+    public static ClassLoader compile(final Lazy source, final Lazy className,
+				  final Lazy loader) throws ScriptException {
 	final String src = source.forced();
 	final String classNm = className.forced();
 	final ClassLoader clsLoader = loader.forced();

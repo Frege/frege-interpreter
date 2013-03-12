@@ -4,16 +4,17 @@
 module frege.script.FregeScriptCompiler where
 
 import frege.compiler.Scanner hiding (main, version, is)
-import frege.compiler.Main(stdOptions, stdPrinter, stdoutPrinter, format, 
-  make, parsePass, postTrue, getOperators)
+import frege.compiler.Main(stdOptions, format, 
+  make, lexPass, parsePass, postTrue, getOperators)
 import frege.compiler.GUtil
 import frege.compiler.BaseTypes(Pos)
 import frege.lib.PP
 import Data.List
 import Data.Maybe
 import frege.List as FL (Tree)
-import frege.IO(`<<`, stdout, stderr, File, OutputStreamWriter, PrintWriter, 
-  Closeable, Appendable, ClassLoader, StringWriter)
+import Java.IO()
+--import frege.IO(`<<`, stdout, stderr, File, OutputStreamWriter, PrintWriter, 
+  --Closeable, Appendable, ClassLoader, StringWriter)
 import frege.compiler.Nice (text, msgdoc)
 import frege.compiler.Classtools  as CT(FregePackage)
 import frege.compiler.Data
@@ -27,7 +28,6 @@ import frege.compiler.TAlias      as P4()
 import frege.compiler.Transdef    as P5()
 import frege.compiler.Classes     as P6()
 import frege.compiler.Transform   as P7()
-import frege.compiler.TCUtil      as TCU()
 import frege.compiler.Typecheck   as TC()
 import frege.compiler.GenMeta     as GM()
 import frege.compiler.gen.Util    as GU()
@@ -43,13 +43,9 @@ createopts sp flags dir path prefix = stdOptions.{
                                 prefix}
                                 
 standardOptions exld = do
-    cache    <- IORef.new Nil      -- start out with empty cache
-    --exld     <- U.theClassLoader stdOptions
-    eprinter <- stdPrinter stderr
-    oprinter <- stdoutPrinter
-    global cache eprinter oprinter exld
-  where
-    global cache eprinter oprinter loader = return Global {
+    cache    <- Ref.new Nil      -- start out with empty cache
+    let loader = exld
+    return Global {
             options = stdOptions,
             sub = Sub {
                 cache, loader,
@@ -65,11 +61,11 @@ standardOptions exld = do
                 messages = [],
                 cancelled = return false,
                 nextPass = 1,
-                stderr = eprinter,
+                stderr = IO.stderr,
                 toExport = []
             },
             gen = Gen {
-                printer = oprinter,
+                printer = IO.stdout,
                 tunique = 0,
                 runique = 0,
                 sunique = 0,
@@ -147,14 +143,13 @@ runpass (pass,description,post) = do
  -}
 run predefs loader steps moduleName = do
     g <- getST
-    p <- doio $ stdoutPrinter
     scriptType <- findScriptType predefs
     newLine <- doio newLine
     let variableName = getVariableName scriptType (g.options.source ++ newLine ++ predefs)
     let source = buildScript g.options.source scriptType predefs variableName newLine moduleName
     changeST $ const g
     changeST Global.{options <- Options.{source=source}}
-    changeST Global.{gen <- GenSt.{printer=p}}    -- just to have no undefined value there
+    changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
     changeST Global.{sub <- SubSt.{loader}}
     foreach steps runpass
     g <- getST
@@ -227,8 +222,11 @@ passes jw packageName = [
     (javacPass jw,           "run java compiler                     ", postTrue)
     ]
     
+data ScriptException = pure native frege.script.ScriptException
+derive Exceptional ScriptException
+
 native javac JavaUtils.compile :: String -> String -> ClassLoader -> 
-  IO (Either String URLClassLoader) 
+  IO (Either ScriptException URLClassLoader) 
 
 javacPass :: StringWriter -> StG (String, Int)
 javacPass src = do
@@ -239,30 +237,13 @@ javacPass src = do
   res <- doio $ javac jsrc packName loader
   case res of
     Left err -> do
-            U.error Position.null (TEXT err)
+            U.error Position.null (TEXT err.getMessage)
             return ("javac", 1)
     Right loader -> do
       changeST Global.{sub <- SubSt.{loader=loader}} --Classloader with compiled class
       return ("javac", 0)
   
     
-lexPass = do
-    changeST Global.{sub <- SubSt.{toks = Array.fromList []}
-                          • SubSt.{definitions = []}
-                          • SubSt.{packageDoc  = Nothing}
-                          • SubSt.{thisPack    = Pack.new ""}}
-    changeST Global.{locals = Nil, typEnv = []}
-    g <- getST
-    tokens <- scanOps getOperators
-    stio ("tokens", length tokens)
-    
-scanOps :: (String -> StG (Exception (Maybe CT.OpArr))) -> StG [Token]
-scanOps getop =
-    do
-        global <- getST
-        let opts   = global.options
-        passCS (CharSeq.fromString opts.source) getop 
-
 compile :: String -> [String] -> [String] -> PrintWriter -> 
   StringWriter -> URLClassLoader -> String -> String -> IO (String, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
@@ -280,7 +261,7 @@ isDefined defs (_@DrvDcl{clas=clas1, typ=typ1}) = isJust . find matching $ defs 
   matching (_@DrvDcl{clas=clas2, typ=typ2}) = show clas1 == show clas2
   matching _ = false-}
 isDefined defs (_@AnnDcl{name=x}) = isJust . find (matching x) $ defs
-isDefined defs (_@NatDcl{name=name1, typ=typ1}) = isJust . find (matching name1) $ defs
+isDefined defs (_@NatDcl{name=name1}) = isJust . find (matching name1) $ defs
 isDefined defs (_@FunDcl{name=x,pats=pats}) = null pats && (isJust . find (matching x) $ defs)
 isDefined defs (_@DatDcl{name=x,defs=ds}) = isJust . find (matching x) $ defs
 isDefined defs (_@JavDcl{name=x}) = isJust . find (matching x) $ defs
@@ -289,7 +270,7 @@ isDefined _ _ = false
 matching x (_@TypDcl{name=y}) = x == y 
 matching x (_@ClaDcl{name=y}) = x == y 
 matching x (_@AnnDcl{name=y}) = x == y
-matching x (_@NatDcl{name=name2, typ=typ2}) = name2 == x
+matching x (_@NatDcl{name=name2}) = name2 == x
 matching x (_@FunDcl{name=y,pats=pats}) = null pats && x == y
 matching x (_@DatDcl{name=y}) = x == y
 matching x (_@JavDcl{name=y}) = x == y 
@@ -365,6 +346,16 @@ isExpressionPass predefs = do
       g <- getST
       return $ g.errors == 0
 
+lexPass = do
+    changeST Global.{sub <- SubSt.{toks = Array.fromList []}
+                            • SubSt.{definitions = []}
+                            • SubSt.{packageDoc  = Nothing}
+                            • SubSt.{thisPack    = Pack.new ""}}
+    changeST Global.{locals = Nil, typEnv = []}
+    g <- getST
+    let opts = g.options
+    tokens <- Lex.passCS (CharSeq.fromString opts.source) getOperators
+    stio ("tokens", length tokens)
  
 
 nubFront [] _ = []
