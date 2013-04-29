@@ -1,7 +1,7 @@
 {--
  * Frege compiler to compile scripts in memory
 -}
-module frege.script.FregeScriptCompiler where
+module frege.interpreter.FregeScriptCompiler where
 
 import frege.compiler.Scanner hiding (main, version, is)
 import frege.compiler.Main(stdOptions, format, 
@@ -144,9 +144,8 @@ runpass (pass,description,post) = do
 run predefs loader steps moduleName = do
     g <- getST
     scriptType <- findScriptType predefs
-    newLine <- doio newLine
     let variableName = getVariableName scriptType (g.options.source ++ newLine ++ predefs)
-    let source = buildScript g.options.source scriptType predefs variableName newLine moduleName
+    let source = buildScript g.options.source scriptType predefs variableName moduleName
     changeST $ const g
     changeST Global.{options <- Options.{source=source}}
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
@@ -158,24 +157,20 @@ run predefs loader steps moduleName = do
 getVariableName ScriptType.Expression script = findUnusedVariableName script
 getVariableName _ _ = ""
 
-native getEnv System.getProperty :: String -> IO String
  
-newLine = getEnv "line.separator" 
+newLine = maybe "\n" id $ System.getProperty "line.separator" 
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = " ++ script
 
-buildScript script ScriptType.Definitions predefs _ newLine moduleName = 
+buildScript script ScriptType.Definitions predefs _ moduleName = 
   intercalate newLine [moduleDeclScript moduleName, predefs, script]
-buildScript script ScriptType.Expression predefs varName newLine moduleName = 
+buildScript script ScriptType.Expression predefs varName moduleName = 
   intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
-buildScript script ScriptType.Module predefs _ newLine _= 
-  script ++ newLine ++ predefs
-
-nums = iterate (+1) 0
+buildScript script ScriptType.Module predefs _   _= script
 
 findUnusedVariableName script = "res" ++ show unusedVarNum where
-  unusedVarNum = unJust $ find (not . flip elem used) nums
+  unusedVarNum = unJust $ find (not . flip elem used) [1..]
   used = loop m []
   m = #res(\d+)#.matcher script
   loop :: Matcher -> [Int] -> [Int]
@@ -222,19 +217,36 @@ passes jw packageName = [
     (javacPass jw,           "run java compiler                     ", postTrue)
     ]
     
-data ScriptException = pure native frege.script.ScriptException
+data ScriptException = pure native javax.script.ScriptException
 derive Exceptional ScriptException
 
-native javac JavaUtils.compile :: String -> String -> ClassLoader -> 
-  IO (Either ScriptException URLClassLoader) 
+data MemoryClassLoader = mutable native frege.memoryjavac.MemoryClassLoader where
+	native new :: ClassLoader -> JMap String ByteArr -> IO MemoryClassLoader
+	native getClasses :: MemoryClassLoader -> IO (JMap String ByteArr)
 
+native asMemoryClassLoader "(frege.memoryjavac.MemoryClassLoader)" :: URLClassLoader -> IO MemoryClassLoader
+
+data ByteArr = mutable native "byte[]"
+
+native javac frege.memoryjavac.JavaUtils.compile :: String -> String -> MemoryClassLoader -> 
+	IO (Either ScriptException MemoryClassLoader) 
+
+data JMap k v = mutable native java.util.Map where
+  native put :: JMap k v -> k -> v -> IO ()
+  native get :: JMap k v -> k -> IO (Maybe v)
+  
+data HashMap k v = mutable native java.util.HashMap where
+  native new :: () -> IO (HashMap k v)
+  
+  
 javacPass :: StringWriter -> StG (String, Int)
 javacPass src = do
   g <- getST
   let !packName = g.sub.thisPack.unpack g
       !loader = g.sub.loader
   !jsrc <- doio $ src.toString
-  res <- doio $ javac jsrc packName loader
+  memloader <- doio $ asMemoryClassLoader loader
+  res <- doio $ javac jsrc packName memloader
   case res of
     Left err -> do
             U.error Position.null (TEXT err.getMessage)
@@ -245,10 +257,10 @@ javacPass src = do
   
     
 compile :: String -> [String] -> [String] -> PrintWriter -> 
-  StringWriter -> URLClassLoader -> String -> String -> IO (String, Global)
+  StringWriter -> MemoryClassLoader -> String -> String  -> IO (String, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
   let flags = Flags.fromList [WITHCP, IDE]
-  let steps = (passes jw moduleName)
+  let steps = passes jw moduleName
   runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName
   
 isDefined :: [DefinitionT] -> Definition -> Bool
@@ -307,8 +319,6 @@ showSymbols g  = map (EU.label g) $ EU.symbols g.thisTab
 existsSymbolWithName g name (s@(SymV {name=x})) = (QName.base x) == name
 existsSymbolWithName g _ _ = false
 
-interpretToken = (Token INTERPRET "INTERPRET" 0 0 0)
-
 iparsePass = do
     g       <- getST
     let tokens = (filter Token.noComment g.sub.toks.toList)
@@ -331,7 +341,6 @@ isExpressionPass predefs = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    newLine <- doio $ newLine
     let decl src = variableDeclScript "f" src --A declaration with some name
     let changeSource src = intercalate newLine ["module T where", predefs, decl src]
     changeST Global.{sub <- SubSt.{stderr=pw}, 
@@ -361,11 +370,10 @@ lexPass = do
 nubFront [] _ = []
 nubFront (x:xs) f = if (f xs x) then nubFront xs f else x : nubFront xs f
 
-type Object = ObjectS RealWorld
-data ObjectS s = native "java.lang.Object" where
-  pure native toString :: Object -> String
+data Object = mutable native "java.lang.Object" where
+	native toString :: Object -> IO String
 
-pure native asObject "(Object)" :: a -> Object
+native asObject "(Object)" :: a -> IO Object
   
 isShowable :: Global -> Symbol -> Bool
 isShowable !g SymV{name,typ} = case typ.rho of

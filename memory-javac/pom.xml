@@ -1,18 +1,16 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>frege</groupId>
-  <artifactId>frege-scripting</artifactId>
-  <packaging>pom</packaging>
-  <version>1.0-SNAPSHOT</version>
-  <name>frege-scripting</name>
-  <url>https://github.com/Frege/frege-scripting</url>
-  <modules>
-    <module>memory-javac</module>
-    <module>frege-interpreter</module>
-  </modules>
+  <parent>
+        <groupId>frege</groupId>
+        <artifactId>frege-scripting</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+  <artifactId>memory-javac</artifactId>
+  <packaging>jar</packaging>
+
   <build>
-    <pluginManagement>
+  <pluginManagement>
       <plugins>
         <!--For Eclipse m2e -->
         <plugin>
@@ -51,10 +49,6 @@
           <target>1.7</target>
         </configuration>
       </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-      </plugin>
     </plugins>
   </build>
   <dependencies>
@@ -63,6 +57,17 @@
       <artifactId>junit</artifactId>
       <version>3.8.1</version>
       <scope>test</scope>
+    </dependency>
+    <dependency>
+    <groupId>frege</groupId>
+    <artifactId>frege</artifactId>
+    <version>3.21.107</version>
+    <classifier>g4bd09eb</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jdt.core.compiler</groupId>
+      <artifactId>ecj</artifactId>
+      <version>3.7.2</version>
     </dependency>
   </dependencies>
 </project>

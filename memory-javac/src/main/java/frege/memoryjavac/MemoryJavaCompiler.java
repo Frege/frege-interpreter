@@ -1,4 +1,4 @@
-package javacompilation;
+package frege.memoryjavac;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -6,12 +6,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import org.eclipse.jdt.internal.compiler.CompilationResult;
 import org.eclipse.jdt.internal.compiler.Compiler;
 import org.eclipse.jdt.internal.compiler.IErrorHandlingPolicy;
 import org.eclipse.jdt.internal.compiler.IProblemFactory;
 import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
-import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
@@ -32,11 +30,9 @@ public class MemoryJavaCompiler {
 		this.problemFactory = new DefaultProblemFactory(Locale.US);
 	}
 
-	public MemoryClassLoader compile(
-			final Map<String, CharSequence> sources,
-			final ClassLoader parent) {
+	public MemoryClassLoader compile(final Map<String, CharSequence> sources,
+			final MemoryClassLoader classLoader) {
 		final ICompilationUnit[] compilationUnits = getCompilationUnits(sources);
-		final MemoryClassLoader classLoader = new MemoryClassLoader(parent);
 		final Compiler compiler = new Compiler(classLoader,
 				errorHandlingPolicy, options, classLoader, problemFactory);
 		compiler.compile(compilationUnits);
@@ -54,8 +50,8 @@ public class MemoryJavaCompiler {
 				.size()]);
 	}
 
-	public MemoryClassLoader compile(
-			final CharSequence sourceCode, final String className, final ClassLoader parent) {
+	public MemoryClassLoader compile(final CharSequence sourceCode,
+			final String className, final MemoryClassLoader parent) {
 		final Map<String, CharSequence> sources = new HashMap<String, CharSequence>();
 		sources.put(getFileName(className), sourceCode);
 		return compile(sources, parent);
@@ -67,12 +63,10 @@ public class MemoryJavaCompiler {
 
 	private static IErrorHandlingPolicy getErrorHandlingPolicy() {
 		return new IErrorHandlingPolicy() {
-			@Override
 			public boolean proceedOnErrors() {
 				return true;
 			}
 
-			@Override
 			public boolean stopOnFirstError() {
 				return false;
 			}
