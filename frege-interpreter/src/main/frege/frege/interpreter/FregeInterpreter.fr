@@ -57,7 +57,7 @@ eval source = do
       let symbol = unJust $ lookupSymbol state var
       --Not a function, so can be displayed
       if isShowable state symbol then do
-        v <- liftIO $ executeClass jsrc s.options.moduleName var state.sub.loader
+        v <- liftIO $ fieldValue jsrc s.options.moduleName var state.sub.loader
         case v of
           Left err -> return $ EvalFailure [err.getMessage]
           Right value -> do
@@ -147,8 +147,11 @@ buildShowScript varName state symbol =
   if isIO state symbol then "show $ IO.performUnsafe " ++ varName
   else "show $ " ++ varName
   
-native executeClass frege.memoryjavac.JavaUtils.execute :: 
+native fieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
   String -> String -> String -> ClassLoader -> IO (Either ScriptException a)
+  
+native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
+   ScriptException
 
 pure native toLowerCase :: String -> String
 pure native trim :: String -> String

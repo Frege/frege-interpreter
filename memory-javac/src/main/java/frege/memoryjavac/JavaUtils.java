@@ -1,5 +1,7 @@
 package frege.memoryjavac;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URLClassLoader;
 
 import javax.script.ScriptException;
@@ -35,7 +37,7 @@ public class JavaUtils {
 	 *            the class loader
 	 * @return either an error message or the value of the variable
 	 */
-	public static Object execute(final String javaSource,
+	public static Object fieldValue(final String javaSource,
 			final String className, final String variableName,
 			final ClassLoader loader) throws ScriptException {
 		try {
@@ -45,6 +47,22 @@ public class JavaUtils {
 			e.printStackTrace();
 			throw (e.getCause() == null ? new ScriptException(e.getMessage())
 					: new ScriptException(e.getCause().getMessage()));
+		}
+	}
+	
+	public static void invokeMain(final String className, final ClassLoader loader) 
+			throws ScriptException {
+		Class<?> clazz;
+		try {
+			clazz = loader.loadClass(className);
+			final Method main = clazz.getDeclaredMethod("main", new Class[] {String[].class});
+			main.invoke(null, new Object[] {new String[] {}});
+		} catch (ClassNotFoundException | IllegalAccessException | 
+				IllegalArgumentException | InvocationTargetException | 
+				NoSuchMethodException | SecurityException e) {
+			final ScriptException exception = new ScriptException(e.getMessage());
+			exception.initCause(e);
+			throw exception;
 		}
 	}
 
