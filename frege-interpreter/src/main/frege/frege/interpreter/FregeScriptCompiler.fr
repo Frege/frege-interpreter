@@ -111,7 +111,7 @@ findScriptType predefs = do
   
 scriptTypePass predefs = do
   g <- getST
-  let tokens = (filter Token.noComment g.sub.toks.toList)
+  let tokens = (filter noComment g.sub.toks.toList)
   case tokens of
     [] -> return ScriptType.Module 
     (Token{tokid=PACKAGE}) : _ -> return ScriptType.Module 
@@ -120,6 +120,8 @@ scriptTypePass predefs = do
       return (if isExpr 
         then ScriptType.Expression 
         else ScriptType.Definitions)
+        
+noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
         
 --- utility function to run the compiler, combines 'createopts' and 'runfregec'
 runcompiler src predefs sp flags dir path prefix pw loader steps moduleName = 
@@ -321,7 +323,7 @@ existsSymbolWithName g _ _ = false
 
 iparsePass = do
     g       <- getST
-    let tokens = (filter Token.noComment g.sub.toks.toList)
+    let tokens = (filter noComment g.sub.toks.toList)
     result <- Parse.pass tokens
     case result of
         Just (Program.Module (packname, defs, doc)) -> do
@@ -350,7 +352,7 @@ isExpressionPass predefs = do
     if g.errors != 0 then
       return false
     else do
-      let tokens = (filter Token.noComment g.sub.toks.toList)
+      let tokens = (filter noComment g.sub.toks.toList)
       result <- Parse.pass tokens
       g <- getST
       return $ g.errors == 0
