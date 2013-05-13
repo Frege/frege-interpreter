@@ -22,8 +22,6 @@ data InterpreterState = InterpreterState {
   currentScript :: String
 } 
 
-data SourceInfo = Expression {varName :: String} | Declarations
-
 data CompilationInfo = CompilationInfo {
   javaSource :: String, 
   sourceInfo :: SourceInfo, 
@@ -48,11 +46,14 @@ eval source = do
   s <- Interpreter.get
   case fregecRes of
     -- The script is a set of definitions
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Declarations,state=state}) ->
+    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Definitions,state=state}) ->
+      return EvalSuccess{compilationInfo=c, symbolInfo=Nothing}
+    -- The script is a module
+    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Module,state=state}) ->
       return EvalSuccess{compilationInfo=c, symbolInfo=Nothing}
     -- The script is an expression 
     CompilationSuccess (c@CompilationInfo{javaSource=jsrc,
-                             sourceInfo=Expression{varName=var},
+                             sourceInfo=Expression{variableName=var},
                              state=state}) -> do
       let symbol = unJust $ lookupSymbol state var
       --Not a function, so can be displayed
@@ -76,23 +77,17 @@ compileTerm src = do
   outWriter <- liftIO $ outStringWriter.printer
   javaSourceStringWriter <- liftIO $ StringWriter.new () -- Java source will be written here
   memloader <- liftIO $ MemoryClassLoader.new s.loader s.classes
-  (variableName, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
+  (sourceInfo, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
     outWriter javaSourceStringWriter memloader s.currentScript s.options.moduleName
   if (Global.errors compilerState == 0) then do --No compilation errors
     javaSource <- liftIO $ javaSourceStringWriter.toString
     memloader <- liftIO $ asMemoryClassLoader $ compilerState.sub.loader
     newclasses <- liftIO $ memloader.getClasses
     Interpreter.put $ s.{classes=newclasses}
-    case variableName of 
-      "" -> do --Definitions
-        return . CompilationSuccess $ CompilationInfo{
+    return . CompilationSuccess $ CompilationInfo{
                                         javaSource=javaSource, 
-                                        sourceInfo=Declarations, 
+                                        sourceInfo=sourceInfo, 
                                         state=compilerState}
-      _ -> do --An expression
-        return . CompilationSuccess $ CompilationInfo{javaSource=javaSource, 
-                                           sourceInfo=Expression variableName, 
-                                           state=compilerState}
   else do --Compilation error. Accumulate the error messages along with their position.
     msgToText m = show (Message.pos m) ++ ": " ++ m.text
     let messages = intercalate newLine $ map msgToText compilerState.sub.messages

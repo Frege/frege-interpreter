@@ -7,6 +7,7 @@
     <groupId>frege</groupId>
     <artifactId>frege-scripting</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
   </parent>
   <artifactId>frege-interpreter</artifactId>
   <packaging>jar</packaging>
@@ -84,8 +85,7 @@
     <dependency>
       <groupId>frege</groupId>
       <artifactId>frege</artifactId>
-      <version>3.21.107</version>
-      <classifier>g4bd09eb</classifier>
+      <version>3.21.107-g4bd09eb</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jdt.core.compiler</groupId>

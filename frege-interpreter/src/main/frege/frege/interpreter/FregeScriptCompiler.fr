@@ -96,30 +96,30 @@ runfregec !src !predefs !opts !pw loader steps moduleName = do
         let g0 = global.{options = opts}.{sub <- SubSt.{stderr=pw}}
         return $ StG.run (run predefs loader steps moduleName) g0.{options <- Options.{source=src}}
 
-data ScriptType = Module | Definitions | Expression
+data SourceInfo = Module | Definitions | Expression {variableName :: String}
 
-derive Show ScriptType
+derive Show SourceInfo
 
 {-returns true if the script is a list of definitions, false if the script
   is an expression or a module-}        
-findScriptType :: String -> StG ScriptType   
+findScriptType :: String -> StG SourceInfo   
 findScriptType predefs = do
   g <- getST
   runpass (lexPass,         "lexical analysis                      ", postTrue)
   g <- getST
-  if g.errors == 0 then scriptTypePass predefs else return ScriptType.Module
+  if g.errors == 0 then scriptTypePass predefs else return SourceInfo.Module
   
 scriptTypePass predefs = do
   g <- getST
   let tokens = (filter noComment g.sub.toks.toList)
   case tokens of
-    [] -> return ScriptType.Module 
-    (Token{tokid=PACKAGE}) : _ -> return ScriptType.Module 
+    [] -> return SourceInfo.Module 
+    (Token{tokid=PACKAGE}) : _ -> return SourceInfo.Module 
     _ -> do
       isExpr <- isExpressionPass predefs
       return (if isExpr 
-        then ScriptType.Expression 
-        else ScriptType.Definitions)
+        then SourceInfo.Expression $ findUnusedVariableName predefs
+        else SourceInfo.Definitions)
         
 noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
         
@@ -146,30 +146,25 @@ runpass (pass,description,post) = do
 run predefs loader steps moduleName = do
     g <- getST
     scriptType <- findScriptType predefs
-    let variableName = getVariableName scriptType (g.options.source ++ newLine ++ predefs)
-    let source = buildScript g.options.source scriptType predefs variableName moduleName
+    let source = buildScript g.options.source scriptType predefs moduleName
     changeST $ const g
     changeST Global.{options <- Options.{source=source}}
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
     changeST Global.{sub <- SubSt.{loader}}
     foreach steps runpass
     g <- getST
-    return variableName
+    return scriptType
 
-getVariableName ScriptType.Expression script = findUnusedVariableName script
-getVariableName _ _ = ""
-
- 
 newLine = maybe "\n" id $ System.getProperty "line.separator" 
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = " ++ script
 
-buildScript script ScriptType.Definitions predefs _ moduleName = 
+buildScript script SourceInfo.Definitions predefs moduleName = 
   intercalate newLine [moduleDeclScript moduleName, predefs, script]
-buildScript script ScriptType.Expression predefs varName moduleName = 
+buildScript script SourceInfo.Expression{variableName=varName} predefs moduleName = 
   intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
-buildScript script ScriptType.Module predefs _   _= script
+buildScript script SourceInfo.Module predefs _ = script
 
 findUnusedVariableName script = "res" ++ show unusedVarNum where
   unusedVarNum = unJust $ find (not . flip elem used) [1..]
@@ -259,7 +254,7 @@ javacPass src = do
   
     
 compile :: String -> [String] -> [String] -> PrintWriter -> 
-  StringWriter -> MemoryClassLoader -> String -> String  -> IO (String, Global)
+  StringWriter -> MemoryClassLoader -> String -> String  -> IO (SourceInfo, Global)
 compile src paths libpaths !ow !jw !loader !predefs !moduleName = do
   let flags = Flags.fromList [WITHCP, IDE]
   let steps = passes jw moduleName
