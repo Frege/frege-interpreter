@@ -18,7 +18,6 @@ data InterpreterState = InterpreterState {
   loader :: URLClassLoader,
   classes :: JMap String ByteArr, --a Java Map for interop to call javac in native code
   options :: Options,
-  history :: [String],
   currentScript :: String
 } 
 
@@ -31,47 +30,45 @@ data CompilationInfo = CompilationInfo {
 data CompilationResult = CompilationSuccess CompilationInfo |
                          CompilationFailure [String]
 
-data SymbolInfo a = SymbolInfo {value :: Maybe a, symbol :: Symbol, name :: String}
-
-data EvalResult a = EvalSuccess {
-                        compilationInfo :: CompilationInfo,
-                        symbolInfo :: Maybe (SymbolInfo a)
-                      }
-                    | EvalFailure [String]
-
-
-eval :: Script -> Interpreter (EvalResult a)
-eval source = do
-  fregecRes <- compileTerm source
-  s <- Interpreter.get
+evalShow :: Script -> Interpreter (Either [String] String)
+evalShow source = do
+  fregecRes <- compile source
   case fregecRes of
     -- The script is a set of definitions
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Definitions,state=state}) ->
-      return EvalSuccess{compilationInfo=c, symbolInfo=Nothing}
-    -- The script is a module
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Module,state=state}) ->
-      return EvalSuccess{compilationInfo=c, symbolInfo=Nothing}
-    -- The script is an expression 
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,
-                             sourceInfo=Expression{variableName=var},
-                             state=state}) -> do
-      let symbol = unJust $ lookupSymbol state var
-      --Not a function, so can be displayed
-      if isShowable state symbol then do
-        v <- liftIO $ fieldValue jsrc s.options.moduleName var state.sub.loader
+    CompilationSuccess (c@CompilationInfo{sourceInfo=sourceInfo,state=g}) ->
+        case sourceInfo of
+            Module -> return $ Left ["Not an expression!"]
+            Definitions -> return $ Left ["Not an expresssion!"]
+            Expression{variableName=var} -> showVariable source var g
+    CompilationFailure err -> return $ Left err
+
+showVariable source var g = do
+      let symbolMay = lookupVarSymbol g.thisTab var
+      case symbolMay of
+        Nothing -> return . Left $ ["Not found: " ++ var]
+        Just symbol -> showSymbol source var symbol g
+        
+showSymbol source var symbol g | isVariable g symbol = do
+    state <- Interpreter.get
+    if isString g symbol then do
+        v <- liftIO $ fieldValue state.options.moduleName var g.sub.loader
         case v of
-          Left err -> return $ EvalFailure [err.getMessage]
-          Right value -> do
-            return EvalSuccess{compilationInfo = c, 
-                               symbolInfo=Just $ SymbolInfo (Just value) symbol var}
-      --A function, so there is no value
-      else do
-        return EvalSuccess{compilationInfo = c,  
-                           symbolInfo=Just $ SymbolInfo Nothing symbol var}
-    CompilationFailure err -> return $ EvalFailure err
-    
-compileTerm :: Script -> Interpreter CompilationResult
-compileTerm src = do
+            Left err -> return $ Left [err.getMessage]
+            Right value -> do
+                obj <- liftIO $ asObject value
+                s <- liftIO $ obj.toString
+                return $ Right s
+    else do
+        let originalScript = state.currentScript
+        Interpreter.put $ state.{currentScript <- (++ newLine ++ var ++ " = " ++ source)}
+        let showScript = buildShowScript var g symbol
+        showResult <- evalShow showScript
+        Interpreter.put $ state.{currentScript = originalScript}
+        return showResult
+showSymbol _ _ symbol g = return . Right $ getSymbolType symbol g
+                
+compile :: Script -> Interpreter CompilationResult
+compile src = do
   s <- Interpreter.get
   outStringWriter <- liftIO $ StringWriter.new () -- A compiler output writer
   outWriter <- liftIO $ outStringWriter.printer
@@ -93,45 +90,23 @@ compileTerm src = do
     let messages = intercalate newLine $ map msgToText compilerState.sub.messages
     return $ CompilationFailure [messages]
 
-invokeShow :: String -> Interpreter (EvalResult a, Either [String] String)
-invokeShow script = do
-  res <- eval  script
-  case res of
-    EvalFailure err -> return (res, Left err)
-    EvalSuccess {compilationInfo=c, symbolInfo=Just sym} -> case sym.value of
-      Nothing -> do --A function
-            let symbolType = getSymbolType sym.symbol c.state
-            return (res, Right symbolType)
-      Just value ->
-            if isString c.state sym.symbol then do
-                obj <- liftIO $ asObject value
-                s <- liftIO $ obj.toString
-                return  (res, Right s)
-            else do
-                state <- Interpreter.get
-                let originalScript = state.currentScript
-                Interpreter.put $ state.{currentScript <- (++ newLine ++ sym.name ++ " = " ++ script)}
-                let showScript = buildShowScript sym.name c.state sym.symbol
-                (evalRes, showResult) <- invokeShow showScript
-                Interpreter.put $ state.{currentScript = originalScript}
-                case showResult of {
-                    Right showValue -> return (res, Right showValue);
-                    Left errs -> return (res, Left errs)
-                }
-    EvalSuccess {compilationInfo=c, symbolInfo=Nothing} -> --Multiple declarations
-      return (res, Right "")
-
-                 
-typeOfExpression :: String -> Interpreter (EvalResult a, Either [String] String)
+typeOfExpression :: String -> Interpreter (Either [String] String)
 typeOfExpression script = do
-  res <- eval script
-  case res of
-    EvalFailure err -> return (res, Left err)
-    EvalSuccess {compilationInfo=c, symbolInfo=Just sym} -> do
-            let symbolType = getSymbolType sym.symbol c.state
-            return (res, Right symbolType)
-    EvalSuccess {compilationInfo=c, symbolInfo=Nothing} -> --Multiple declarations
-      return (res, Right "Not an expression!")
+  fregecRes <- compile script
+  case fregecRes of
+    -- The script is a set of definitions
+    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Definitions,state=state}) ->
+      return $ Left ["Not an expression!"]
+    -- The script is a module
+    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Module,state=state}) ->
+       return $ Left ["Not an expression!"]
+    -- The script is an expression 
+    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,
+                             sourceInfo=Expression{variableName=var},
+                             state=g}) -> 
+        let symbol = unJust $ lookupVarSymbol g.thisTab var in
+        return . Right $ getSymbolType symbol g
+    CompilationFailure err -> return $ Left err
       
 {--
  * [returns] the show script for the passed symbol. If the symbol is of type IO,
@@ -143,7 +118,7 @@ buildShowScript varName state symbol =
   else "show $ " ++ varName
   
 native fieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
-  String -> String -> String -> ClassLoader -> IO (Either ScriptException a)
+  String -> String -> ClassLoader -> IO (Either ScriptException a)
   
 native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
    ScriptException

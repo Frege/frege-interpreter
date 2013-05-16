@@ -37,14 +37,12 @@ public class JavaUtils {
 	 *            the class loader
 	 * @return either an error message or the value of the variable
 	 */
-	public static Object fieldValue(final String javaSource,
-			final String className, final String variableName,
-			final ClassLoader loader) throws ScriptException {
+	public static Object fieldValue(final String className, 
+		final String variableName,	final ClassLoader loader) throws ScriptException {
 		try {
 			final Class<?> clazz = loader.loadClass(className);
 			return clazz.getDeclaredField(variableName).get(null);
 		} catch (final Throwable e) { // Catch Frege runtime errors
-			e.printStackTrace();
 			throw (e.getCause() == null ? new ScriptException(e.getMessage())
 					: new ScriptException(e.getCause().getMessage()));
 		}

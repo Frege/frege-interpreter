@@ -295,14 +295,14 @@ isFunDefined decls ((_@FunDcl{name=x}):_) = isJust . find (pred x) $ map head de
 isFunDefined _ _ = false
 
 exprType :: Global -> String -> String    
-exprType g compilationId = let symbols = (EU.symbols g.thisTab) in 
-  case (find (existsSymbolWithName g compilationId) symbols) of
+exprType g compilationId = let symbols = EU.symbols g.thisTab in 
+  case (find (existsVarSymbol compilationId) symbols) of
     Just s -> EU.label g s
     Nothing -> ""
     
-lookupSymbol :: Global -> String -> Maybe Symbol    
-lookupSymbol g name = let symbols = (EU.symbols g.thisTab) in 
-  find (existsSymbolWithName g name) symbols
+lookupVarSymbol :: Symtab -> String -> Maybe Symbol    
+lookupVarSymbol symtab name = let symbols = (EU.symbols symtab) in 
+  find (existsVarSymbol name) symbols
 
 getSymbolType :: Symbol -> Global -> String
 getSymbolType SymI{typ} !g = EU.verbose g typ
@@ -313,8 +313,8 @@ getSymbolType _ _ = ""
 showSymbols :: Global -> [String]
 showSymbols g  = map (EU.label g) $ EU.symbols g.thisTab
   
-existsSymbolWithName g name (s@(SymV {name=x})) = (QName.base x) == name
-existsSymbolWithName g _ _ = false
+existsVarSymbol name (s@(SymV {name=x})) = (QName.base x) == name
+existsVarSymbol _ _ = false
 
 iparsePass = do
     g       <- getST
@@ -372,11 +372,11 @@ data Object = mutable native "java.lang.Object" where
 
 native asObject "(Object)" :: a -> IO Object
   
-isShowable :: Global -> Symbol -> Bool
-isShowable !g SymV{name,typ} = case typ.rho of
+isVariable :: Global -> Symbol -> Bool
+isVariable !g SymV{name,typ} = case typ.rho of
   RhoFun _ _ _ = false
   RhoTau ctx _ = ctx == [] 
-isShowable _ _ = false
+isVariable _ _ = false
 
 isIO :: Global -> Symbol -> Bool
 isIO !g SymV{typ} = case (U.unAlias g $ RhoT.tau typ.rho) of
