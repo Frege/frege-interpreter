@@ -120,6 +120,9 @@ buildShowScript varName state symbol =
 native fieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
   String -> String -> ClassLoader -> IO (Either ScriptException a)
   
+native spawnFetchFieldValue frege.memoryjavac.JavaUtils.spawnFetchFieldValue :: 
+  String -> String -> JMap String ByteArr -> IO (Either ScriptException a)
+  
 native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
    ScriptException
 
