@@ -59,11 +59,9 @@ showSymbol source var symbol g | isVariable g symbol = do
                 s <- liftIO $ obj.toString
                 return $ Right s
     else do
-        let originalScript = state.currentScript
         Interpreter.put $ state.{currentScript <- (++ newLine ++ var ++ " = " ++ source)}
         let showScript = buildShowScript var g symbol
         showResult <- evalShow showScript
-        Interpreter.put $ state.{currentScript = originalScript}
         return showResult
 showSymbol _ _ symbol g = return . Right $ getSymbolType symbol g
                 
