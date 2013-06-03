@@ -30,41 +30,6 @@ data CompilationInfo = CompilationInfo {
 data CompilationResult = CompilationSuccess CompilationInfo |
                          CompilationFailure [String]
 
-evalShow :: Script -> Interpreter (Either [String] String)
-evalShow source = do
-  fregecRes <- compile source
-  case fregecRes of
-    -- The script is a set of definitions
-    CompilationSuccess (c@CompilationInfo{sourceInfo=sourceInfo,state=g}) ->
-        case sourceInfo of
-            Module -> return $ Left ["Not an expression!"]
-            Definitions -> return $ Left ["Not an expresssion!"]
-            Expression{variableName=var} -> showVariable source var g
-    CompilationFailure err -> return $ Left err
-
-showVariable source var g = do
-      let symbolMay = lookupVarSymbol g.thisTab var
-      case symbolMay of
-        Nothing -> return . Left $ ["Not found: " ++ var]
-        Just symbol -> showSymbol source var symbol g
-        
-showSymbol source var symbol g | isVariable g symbol = do
-    state <- Interpreter.get
-    if isString g symbol then do
-        v <- liftIO $ fieldValue state.options.moduleName var g.sub.loader
-        case v of
-            Left err -> return $ Left [err.getMessage]
-            Right value -> do
-                obj <- liftIO $ asObject value
-                s <- liftIO $ obj.toString
-                return $ Right s
-    else do
-        Interpreter.put $ state.{currentScript <- (++ newLine ++ var ++ " = " ++ source)}
-        let showScript = buildShowScript var g symbol
-        showResult <- evalShow showScript
-        return showResult
-showSymbol _ _ symbol g = return . Right $ getSymbolType symbol g
-                
 compile :: Script -> Interpreter CompilationResult
 compile src = do
   s <- Interpreter.get
@@ -114,12 +79,6 @@ typeOfExpression script = do
 buildShowScript varName state symbol = 
   if isIO state symbol then "show $ IO.performUnsafe " ++ varName
   else "show $ " ++ varName
-  
-native fieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
-  String -> String -> ClassLoader -> IO (Either ScriptException a)
-  
-native spawnFetchFieldValue frege.memoryjavac.JavaUtils.spawnFetchFieldValue :: 
-  String -> String -> JMap String ByteArr -> IO (Either ScriptException a)
   
 native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
    ScriptException
