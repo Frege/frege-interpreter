@@ -1,20 +1,9 @@
 package frege.memoryjavac;
 
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
 import java.io.FilePermission;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.ConnectException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.security.Permission;
-import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 

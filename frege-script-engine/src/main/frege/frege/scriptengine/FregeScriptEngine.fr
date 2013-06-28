@@ -1,0 +1,171 @@
+module frege.scriptengine.FregeScriptEngine where
+
+import frege.interpreter.FregeScriptCompiler
+import frege.interpreter.FregeInterpreter
+import frege.java.Net
+
+data ScriptContext = mutable native javax.script.ScriptContext where
+    native getAttribute :: ScriptContext -> String -> Int -> IO (Maybe Object)
+    native setAttribute :: ScriptContext -> String -> Object -> Int -> IO ()
+    pure native engineScope javax.script.ScriptContext.ENGINE_SCOPE :: Int
+    pure native globalScope javax.script.ScriptContext.GLOBAL_SCOPE :: Int
+    native getBindings :: ScriptContext -> Int -> IO Bindings
+    
+data Bindings = mutable native javax.script.Bindings where
+    native asMap "(java.util.Map)" :: Bindings -> IO (JMap String Object)
+
+initScript = "import scripting.Setting"
+    
+initInterpreterState :: ScriptContext -> IO InterpreterState 
+initInterpreterState session = do
+  urlarr <- URLArray.new 0
+  loader <- ClassLoader.current >>= URLClassLoader.new urlarr
+  classesMaybe <- session.getAttribute "classes" ScriptContext.engineScope
+  classes <- maybe (HashMap.new () :: IO (JMap String ByteArr)) asClassesMap classesMaybe
+  strMaybe <- session.getAttribute "script" ScriptContext.engineScope
+  currentScript <-  maybe (return initScript) asString strMaybe
+  let options = Options {moduleName = "script.Main"}
+  let interpreterState = InterpreterState {
+      loader = loader,
+      classes = classes,
+      options = options,
+      currentScript = currentScript
+  }
+  return interpreterState
+
+eval :: String -> ScriptContext -> IO ([String] | Maybe Object)
+eval script context = do
+    let options = Options {moduleName = "script.Main"}
+    state <- initInterpreterState context
+    (res, state) <- runInterpreter (interpret script context) state
+    case res of
+        Left _ -> return res
+        Right _ -> do
+            putContext context "classes" state.classes ScriptContext.engineScope
+            putContext context "script" state.currentScript ScriptContext.engineScope
+            return res
+            
+load :: String -> ScriptContext -> IO ([String] | ClassLoader)
+load script context = do
+    let options = Options {moduleName = "script.Main"}
+    state <- initInterpreterState context
+    evalInterpreter (loadIntp script) state
+
+compiledScript :: String -> ScriptContext -> IO ([String] | CompilationResult)
+compiledScript script context = do
+    let options = Options {moduleName = "script.Main"}
+    state <- initInterpreterState context
+    res <- evalInterpreter (compile script) state
+    case res of
+        CompilationSuccess c -> return $ Right res
+        CompilationFailure err -> return $ Left err
+
+evalCompiledScript :: CompilationResult -> String -> ScriptContext -> IO ([String] | Maybe Object)
+evalCompiledScript compilation script context = do
+    let options = Options {moduleName = "script.Main"}
+    state <- initInterpreterState context
+    (res, state) <- runInterpreter (interpretCompiled compilation script context) state
+    case res of
+        Left _ -> return res
+        Right _ -> do
+            putContext context "classes" state.classes ScriptContext.engineScope
+            putContext context "script" state.currentScript ScriptContext.engineScope
+            return res
+    
+loadIntp :: String -> Interpreter ([String] | ClassLoader )
+loadIntp script = do
+    fregecRes <- compile script
+    case fregecRes of
+        CompilationSuccess (c@CompilationInfo{sourceInfo=sourceInfo,state=g}) ->
+            return $ Right g.sub.loader
+        CompilationFailure err -> return $ Left err
+        
+interpret :: String -> ScriptContext -> Interpreter ([String] | Maybe Object)
+interpret script context = compile script >>= evaluate where
+    evaluate c = interpretCompiled c script context
+
+interpretCompiled :: CompilationResult -> String -> ScriptContext -> Interpreter ([String] | Maybe Object)    
+interpretCompiled res script context = case res of
+    CompilationSuccess (c@CompilationInfo{sourceInfo=sourceInfo,state=g}) ->
+        case sourceInfo of
+            Expression{variableName=var} -> fetchVariableValue var g context
+            Module -> return $ Right Nothing
+            Definitions -> do
+                s <- Interpreter.get
+                Interpreter.put $ s.{currentScript <- (++ newLine ++ script)}
+                return $ Right Nothing
+    CompilationFailure err -> return $ Left err
+
+fetchVariableValue var g context = do
+      let symbolMay = lookupVarSymbol g.thisTab var
+      case symbolMay of
+        Nothing -> return $ Right Nothing
+        Just symbol -> fetchSymbolValue var symbol g context
+
+fetchSymbolValue var symbol g context | isVariable g symbol = do
+    state <- Interpreter.get
+    loader <- liftIO $ asMemoryClassLoader g.sub.loader
+    bindingseither <- liftIO $ getBindings loader
+    case bindingseither of
+        Left err -> return . Left $ [err]
+        Right bindings -> do
+            liftIO $ putIntoBindings bindings context
+            v <- liftIO $ fetchFieldValue state.options.moduleName var loader
+            case v of
+                Left err -> return $ Left [err.getMessage]
+                Right value -> do
+                    obj <- liftIO $ asObject value
+                    return $ Right $ Just obj
+fetchSymbolValue _ symbol g _ = return $ Right Nothing
+
+putIntoBindings :: JMap String Object -> ScriptContext -> IO ()
+putIntoBindings bindings context = do
+    bs <- context.getBindings ScriptContext.engineScope
+    m <- bs.asMap 
+    bindings.putAll m
+    
+native fetchFieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
+  String -> String -> ClassLoader -> IO (Either ScriptException Object)
+  
+getBindings :: MemoryClassLoader -> IO (String | JMap String Object)
+getBindings loader = do
+     v <- fieldValue "scripting.Setting" "engineMap" loader
+     case v of
+        Left err -> return . Left $ err.getMessage
+        Right obj -> asBindingsMap obj >>= return . Right 
+     
+data NoSuchFieldException = native java.lang.NoSuchFieldException
+data SecurityException = native java.lang.SecurityException
+data IllegalAccessException = native java.lang.IllegalAccessException
+
+derive Exceptional NoSuchFieldException
+derive Exceptional SecurityException    
+
+data Clazz = pure native java.lang.Class where
+    native getDeclaredField :: Clazz -> String -> IO Field throws NoSuchFieldException, SecurityException
+  
+data Field = mutable native java.lang.reflect.Field where
+    native get :: Field -> Object -> IO Object throws IllegalAccessException
+
+native loadClass :: ClassLoader -> String -> IO Clazz throws ClassNotFoundException
+    
+fieldValue :: String -> String -> ClassLoader -> IO (Throwable | Object)
+fieldValue className variableName loader = 
+    (action >>= (return . Right)) `catch` (return . Left) where
+        action = do
+            clazz <- loadClass loader className
+            ignore <- asObject ""
+            field <- clazz.getDeclaredField variableName
+            field.get ignore
+        
+native asObject "(Object)" :: a -> IO Object
+  
+putContext :: ScriptContext -> String -> a -> Int -> IO ()
+putContext context name value scope = do
+    obj <- asObject value
+    ScriptContext.setAttribute context name obj scope
+
+native asClassesMap "(java.util.Map)" :: Object -> IO (JMap String ByteArr)
+native asString "(java.lang.String)" :: Object -> IO String
+native asURLClassLoader "(java.net.URLClassLoader)" :: Object -> IO URLClassLoader
+native asBindingsMap "(java.util.Map)" :: Object -> IO (JMap String Object)

@@ -135,7 +135,9 @@ instance Monad Interpreter where
 instance MonadIO Interpreter where
     liftIO = Interpreter . lift
     
---runInterpreter :: Interpreter a -> InterpreterState -> IO (EvalResult a)
-runInterpreter interpreter state = 
+evalInterpreter interpreter state = 
   evalStateT (Interpreter.unInterpreter interpreter) state
+  
+runInterpreter interpreter state = 
+    StateT.runStateT (Interpreter.unInterpreter interpreter) state
   

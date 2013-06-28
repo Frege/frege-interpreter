@@ -168,10 +168,10 @@ buildScript script SourceInfo.Module predefs _ = script
 
 findUnusedVariableName script = "res" ++ show unusedVarNum where
   unusedVarNum = unJust $ find (not . flip elem used) [1..]
-  used = loop m []
+  used = reverse $ loop m []
   m = #res(\d+)#.matcher script
   loop :: Matcher -> [Int] -> [Int]
-  loop m1 acc | Just m2 <- m1.find = (atoi • unJust $ m2.group 1) : (loop m2 acc)
+  loop m1 acc | Just m2 <- m1.find = loop m2 ((atoi . unJust $ m2.group 1) : acc)
               | otherwise = acc
      
 openPrinter pw = do
@@ -231,6 +231,7 @@ native javac frege.memoryjavac.JavaUtils.compile :: String -> String -> MemoryCl
 data JMap k v = mutable native java.util.Map where
   native put :: JMap k v -> k -> v -> IO ()
   native get :: JMap k v -> k -> IO (Maybe v)
+  native putAll :: JMap k v -> JMap k v -> IO ()
   
 data HashMap k v = mutable native java.util.HashMap where
   native new :: () -> IO (HashMap k v)
