@@ -12,7 +12,7 @@ data ScriptContext = mutable native javax.script.ScriptContext where
     native getBindings :: ScriptContext -> Int -> IO Bindings
     
 data Bindings = mutable native javax.script.Bindings where
-    native asMap "(java.util.Map)" :: Bindings -> IO (JMap String Object)
+    native asMap "(java.util.Map)" :: Bindings -> IOMutable (JMap String Object)
 
 initScript = "import scripting.Setting"
     
@@ -21,21 +21,22 @@ initInterpreterState session = do
   urlarr <- URLArray.new 0
   loader <- ClassLoader.current >>= URLClassLoader.new urlarr
   classesMaybe <- session.getAttribute "classes" ScriptContext.engineScope
-  classes <- maybe (HashMap.new () :: IO (JMap String ByteArr)) asClassesMap classesMaybe
+  classes <- maybe (HashMap.new () :: IOMutable (JMap String ByteArr)) asClassesMap classesMaybe
   strMaybe <- session.getAttribute "script" ScriptContext.engineScope
   currentScript <-  maybe (return initScript) asString strMaybe
-  let options = Options {moduleName = "script.Main"}
+  modulePreludeMaybe <- session.getAttribute "modulePrelude" ScriptContext.engineScope
+  modulePrelude <- maybe (return "") asString modulePreludeMaybe
   let interpreterState = InterpreterState {
       loader = loader,
       classes = classes,
-      options = options,
-      currentScript = currentScript
+      moduleName = "script.Main",
+      currentScript = currentScript,
+      modulePrelude = modulePrelude
   }
   return interpreterState
 
 eval :: String -> ScriptContext -> IO ([String] | Maybe Object)
 eval script context = do
-    let options = Options {moduleName = "script.Main"}
     state <- initInterpreterState context
     (res, state) <- runInterpreter (interpret script context) state
     case res of
@@ -47,13 +48,11 @@ eval script context = do
             
 load :: String -> ScriptContext -> IO ([String] | ClassLoader)
 load script context = do
-    let options = Options {moduleName = "script.Main"}
     state <- initInterpreterState context
     evalInterpreter (loadIntp script) state
 
 compiledScript :: String -> ScriptContext -> IO ([String] | CompilationResult)
 compiledScript script context = do
-    let options = Options {moduleName = "script.Main"}
     state <- initInterpreterState context
     res <- evalInterpreter (compile script) state
     case res of
@@ -62,7 +61,6 @@ compiledScript script context = do
 
 evalCompiledScript :: CompilationResult -> String -> ScriptContext -> IO ([String] | Maybe Object)
 evalCompiledScript compilation script context = do
-    let options = Options {moduleName = "script.Main"}
     state <- initInterpreterState context
     (res, state) <- runInterpreter (interpretCompiled compilation script context) state
     case res of
@@ -110,15 +108,13 @@ fetchSymbolValue var symbol g context | isVariable g symbol = do
         Left err -> return . Left $ [err]
         Right bindings -> do
             liftIO $ putIntoBindings bindings context
-            v <- liftIO $ fetchFieldValue state.options.moduleName var loader
+            v <- liftIO $ fetchFieldValue state.moduleName var loader
             case v of
                 Left err -> return $ Left [err.getMessage]
-                Right value -> do
-                    obj <- liftIO $ asObject value
-                    return $ Right $ Just obj
+                Right value -> return $ Right $ Just (asObject value)
 fetchSymbolValue _ symbol g _ = return $ Right Nothing
 
-putIntoBindings :: JMap String Object -> ScriptContext -> IO ()
+putIntoBindings :: MutableIO (JMap String Object) -> ScriptContext -> IO ()
 putIntoBindings bindings context = do
     bs <- context.getBindings ScriptContext.engineScope
     m <- bs.asMap 
@@ -127,7 +123,7 @@ putIntoBindings bindings context = do
 native fetchFieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
   String -> String -> ClassLoader -> IO (Either ScriptException Object)
   
-getBindings :: MemoryClassLoader -> IO (String | JMap String Object)
+getBindings :: MemoryClassLoader -> IO (String | (MutableIO (JMap String Object)))
 getBindings loader = do
      v <- fieldValue "scripting.Setting" "engineMap" loader
      case v of
@@ -154,18 +150,16 @@ fieldValue className variableName loader =
     (action >>= (return . Right)) `catch` (return . Left) where
         action = do
             clazz <- loadClass loader className
-            ignore <- asObject ""
             field <- clazz.getDeclaredField variableName
-            field.get ignore
+            field.get $ asObject ""
         
-native asObject "(Object)" :: a -> IO Object
+pure native asObject "(Object)" :: a -> Object
   
 putContext :: ScriptContext -> String -> a -> Int -> IO ()
-putContext context name value scope = do
-    obj <- asObject value
-    ScriptContext.setAttribute context name obj scope
+putContext context name value scope = 
+    ScriptContext.setAttribute context name (asObject value) scope
 
-native asClassesMap "(java.util.Map)" :: Object -> IO (JMap String ByteArr)
+native asClassesMap "(java.util.Map)" :: Object -> IOMutable (JMap String ByteArr)
 native asString "(java.lang.String)" :: Object -> IO String
 native asURLClassLoader "(java.net.URLClassLoader)" :: Object -> IO URLClassLoader
-native asBindingsMap "(java.util.Map)" :: Object -> IO (JMap String Object)
+native asBindingsMap "(java.util.Map)" :: Object -> IOMutable (JMap String Object)

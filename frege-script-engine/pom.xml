@@ -59,7 +59,7 @@
     <dependency>
       <groupId>frege</groupId>
       <artifactId>frege</artifactId>
-      <version>3.21.107-g4bd09eb</version>
+      <version>${frege.version}</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jdt.core.compiler</groupId>

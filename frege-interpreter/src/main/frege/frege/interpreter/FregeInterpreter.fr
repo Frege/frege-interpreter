@@ -12,13 +12,12 @@ import frege.java.Net
 
 type Script = String
 
-data Options = Options {moduleName :: String}
-
 data InterpreterState = InterpreterState {
   loader :: URLClassLoader,
-  classes :: JMap String ByteArr, --a Java Map for interop to call javac in native code
-  options :: Options,
-  currentScript :: String
+  classes :: MutableIO (JMap String ByteArr), --a Java Map for interop to call javac in native code
+  moduleName :: String,
+  currentScript :: String,
+  modulePrelude :: String
 } 
 
 data CompilationInfo = CompilationInfo {
@@ -38,10 +37,10 @@ compile src = do
   javaSourceStringWriter <- liftIO $ StringWriter.new () -- Java source will be written here
   memloader <- liftIO $ MemoryClassLoader.new s.loader s.classes
   (sourceInfo, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
-    outWriter javaSourceStringWriter memloader s.currentScript s.options.moduleName
+    outWriter javaSourceStringWriter memloader s.currentScript s.moduleName s.modulePrelude
   if (Global.errors compilerState == 0) then do --No compilation errors
     javaSource <- liftIO $ javaSourceStringWriter.toString
-    memloader <- liftIO $ asMemoryClassLoader $ compilerState.sub.loader
+    memloader <- liftIO $ asMemoryClassLoader compilerState.sub.loader
     newclasses <- liftIO $ memloader.getClasses
     Interpreter.put $ s.{classes=newclasses}
     return . CompilationSuccess $ CompilationInfo{
