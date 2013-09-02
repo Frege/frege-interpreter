@@ -340,7 +340,7 @@ isExpressionPass predefs = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    let decl src = variableDeclScript "f" src --A declaration with some name
+    let decl src = variableDeclScript "f" ("(" ++ src ++ ")") --A declaration with some name
     let changeSource src = intercalate newLine ["module T where", predefs, decl src]
     changeST Global.{sub <- SubSt.{stderr=pw}, 
       options <- Options.{source <- changeSource}}
@@ -356,9 +356,9 @@ isExpressionPass predefs = do
 
 lexPass = do
     changeST Global.{sub <- SubSt.{toks = Array.fromList []}
-                            • SubSt.{definitions = []}
-                            • SubSt.{packageDoc  = Nothing}
-                            • SubSt.{thisPack    = Pack.new ""}}
+                            . SubSt.{definitions = []}
+                            . SubSt.{packageDoc  = Nothing}
+                            . SubSt.{thisPack    = Pack.new ""}}
     changeST Global.{locals = Nil, typEnv = []}
     g <- getST
     let opts = g.options
