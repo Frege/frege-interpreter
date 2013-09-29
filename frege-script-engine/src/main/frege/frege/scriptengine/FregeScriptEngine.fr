@@ -102,13 +102,12 @@ fetchVariableValue var g context = do
 
 fetchSymbolValue var symbol g context | isVariable g symbol = do
     state <- Interpreter.get
-    loader <- liftIO $ asMemoryClassLoader g.sub.loader
-    bindingseither <- liftIO $ getBindings loader
+    bindingseither <- liftIO $ getBindings g.sub.loader
     case bindingseither of
         Left err -> return . Left $ [err]
         Right bindings -> do
             liftIO $ putIntoBindings bindings context
-            v <- liftIO $ fetchFieldValue state.moduleName var loader
+            v <- liftIO $ fetchFieldValue state.moduleName var g.sub.loader
             case v of
                 Left err -> return $ Left [err.getMessage]
                 Right value -> return $ Right $ Just (asObject value)
@@ -123,7 +122,7 @@ putIntoBindings bindings context = do
 native fetchFieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
   String -> String -> ClassLoader -> IO (Either ScriptException Object)
   
-getBindings :: MemoryClassLoader -> IO (String | (MutableIO (JMap String Object)))
+getBindings :: URLClassLoader -> IO (String | (MutableIO (JMap String Object)))
 getBindings loader = do
      v <- fieldValue "scripting.Setting" "engineMap" loader
      case v of

@@ -35,13 +35,13 @@ compile src = do
   outStringWriter <- liftIO $ StringWriter.new () -- A compiler output writer
   outWriter <- liftIO $ outStringWriter.printer
   javaSourceStringWriter <- liftIO $ StringWriter.new () -- Java source will be written here
-  memloader <- liftIO $ MemoryClassLoader.new s.loader s.classes
+  javac <- liftIO $ MemoryJavaCompiler.new s.loader s.classes
   (sourceInfo, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
-    outWriter javaSourceStringWriter memloader s.currentScript s.moduleName s.modulePrelude
+    outWriter javaSourceStringWriter javac s.currentScript s.moduleName s.modulePrelude
+  javaSource <- liftIO $ javaSourceStringWriter.toString
   if (Global.errors compilerState == 0) then do --No compilation errors
     javaSource <- liftIO $ javaSourceStringWriter.toString
-    memloader <- liftIO $ asMemoryClassLoader compilerState.sub.loader
-    newclasses <- liftIO $ memloader.getClasses
+    newclasses <- liftIO $ javac.classes
     Interpreter.put $ s.{classes=newclasses}
     return . CompilationSuccess $ CompilationInfo{
                                         javaSource=javaSource, 
@@ -66,8 +66,7 @@ typeOfExpression script = do
     CompilationSuccess (c@CompilationInfo{javaSource=jsrc,
                              sourceInfo=Expression{variableName=var},
                              state=g}) -> 
-        let symbol = unJust $ lookupVarSymbol g.thisTab var in
-        return . Right $ getSymbolType symbol g
+        return $ maybe (Left ["Invalid expression!"]) (\s -> Right $ getSymbolType s g) $ lookupVarSymbol g.thisTab var
     CompilationFailure err -> return $ Left err
       
 {--

@@ -12,10 +12,8 @@ import frege.compiler.BaseTypes(Pos)
 import frege.lib.PP
 import Data.List
 import Data.Maybe
-import frege.List as FL (Tree)
 import Java.IO()
---import frege.IO(`<<`, stdout, stderr, File, OutputStreamWriter, PrintWriter, 
-  --Closeable, Appendable, ClassLoader, StringWriter)
+import Data.TreeMap (Tree, values)
 import frege.compiler.Nice (text, msgdoc)
 import frege.compiler.Classtools  as CT(FregePackage)
 import frege.compiler.Data
@@ -35,6 +33,7 @@ import frege.compiler.gen.Util    as GU()
 import frege.compiler.GenJava7    as G7()
 import frege.compiler.EclipseUtil as EU()
 import frege.java.Net
+import frege.java.Lang (ClassLoader)
 
 --- utility function to create 'Options' data structure
 createopts sp flags dir path prefix = stdOptions.{
@@ -44,19 +43,20 @@ createopts sp flags dir path prefix = stdOptions.{
                                 prefix}
                                 
 standardOptions exld = do
-    cache    <- Ref.new Nil      -- start out with empty cache
-    let loader = exld
+    cache <- Ref.new Tree.empty -- start out with empty cache
+    urlArr <- URLArray.new 0
+    loader <- URLClassLoader.new urlArr exld
     return Global {
             options = stdOptions,
             sub = Sub {
                 cache, loader,
-                optab = Nil,
+                optab = Tree.empty,
                 toks = Array.fromList [],
-                idKind = Nil,
+                idKind = Tree.empty,
                 definitions = [],
                 packageDoc = Nothing,
                 thisPos  = Position.null,
-                nsPos = Nil,
+                nsPos = Tree.empty,
                 thisPack = Pack.new "",
                 errors  = 0,
                 messages = [],
@@ -72,30 +72,31 @@ standardOptions exld = do
                 sunique = 0,
                 xunique = 1,
                 kunique = 1,
-                tTree = Nil,
-                rTree = Nil,
-                sTree = Nil,
-                xTree = Nil .insert GU.defEA 0,        -- so that 0 never indexes valid expression
-                kTree = Nil .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
-                consts = Nil,
-                lambdas = Nil,
-                syminfo = Nil,
-                jimport = Nil,
+                tTree = Tree.empty,
+                rTree = Tree.empty,
+                sTree = Tree.empty,
+                xTree = Tree.empty .insert GU.defEA 0,        -- so that 0 never indexes valid expression
+                kTree = Tree.empty .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
+                consts = Tree.empty,
+                lambdas = Tree.empty,
+                syminfo = Tree.empty,
+                jimport = Tree.empty,
             },
             unique = 1,
-            packages = Nil,
-            namespaces = Nil,
+            packages = Tree.empty,
+            namespaces = Tree.empty,
             genEnv = [],
-            javaEnv = Nil,
-            locals = Nil,
-            typEnv = []
+            javaEnv = Tree.empty,
+            locals = Tree.empty,
+            typEnv = [],
+            tySubst = Tree.empty
         }
         
 --- utility function to run the compiler, callable from Java
 runfregec !src !predefs !opts !pw loader steps moduleName modulePrelude = do
         global <- standardOptions loader
         let g0 = global.{options = opts}.{sub <- SubSt.{stderr=pw}}
-        return $ StG.run (run predefs loader steps moduleName modulePrelude) g0.{options <- Options.{source=src}}
+        return $ StG.run (run predefs steps moduleName modulePrelude) g0.{options <- Options.{source=src}}
 
 data SourceInfo = Module | Definitions | Expression {variableName :: String}
 
@@ -144,14 +145,14 @@ runpass (pass,description,post) = do
  * 'run' all passes, one after another
  * until one of them returns an error
  -}
-run predefs loader steps moduleName modulePrelude = do
+run predefs steps moduleName modulePrelude = do
     g <- getST
     scriptType <- findScriptType predefs
     let source = buildScript g.options.source scriptType predefs moduleName modulePrelude
     changeST $ const g
     changeST Global.{options <- Options.{source=source}}
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
-    changeST Global.{sub <- SubSt.{loader}}
+    --changeST Global.{sub <- SubSt.{loader}}
     foreach steps runpass
     g <- getST
     return scriptType
@@ -189,7 +190,7 @@ openPrinter pw = do
     *Note*: It is important that the typecheck pass has a description that starts with "type check".
     This way the IDE recognizes the last pass if it is not a build.
 -}
-passes jw packageName = [
+passes jw packageName javac = [
     -- function       description                            post condition
     (lexPass,         "lexical analysis                      ", postTrue),
     (iparsePass,      "syntax  analysis                      ", 
@@ -212,22 +213,20 @@ passes jw packageName = [
     (openPrinter jw,     "open file                             ", postTrue),
     (GM.pass,         "generate meta data                    ", GM.post),   -- none
     (G7.pass,         "generate java code                    ", G7.post),  -- TRACEG
-    (javacPass jw,           "run java compiler                     ", postTrue)
+    (javacPass javac jw,           "run java compiler                     ", postTrue)
     ]
     
 data ScriptException = pure native javax.script.ScriptException
 derive Exceptional ScriptException
 
-data MemoryClassLoader = mutable native frege.memoryjavac.MemoryClassLoader where
-	native new :: ClassLoader -> MutableIO (JMap String ByteArr) -> IO MemoryClassLoader
-	native getClasses :: MemoryClassLoader -> IOMutable (JMap String ByteArr)
-
-native asMemoryClassLoader "(frege.memoryjavac.MemoryClassLoader)" :: URLClassLoader -> IO MemoryClassLoader
-
+data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
+  native new :: ClassLoader -> MutableIO (JMap String ByteArr) -> IOMutable MemoryJavaCompiler 
+  native compile :: MutableIO MemoryJavaCompiler -> String -> String -> IO Bool
+  native classLoader ::  MutableIO MemoryJavaCompiler -> IO ClassLoader
+  native error :: MutableIO MemoryJavaCompiler -> IO String
+  native classes :: MutableIO MemoryJavaCompiler -> IOMutable (JMap String ByteArr)
+  
 data ByteArr = mutable native "byte[]"
-
-native javac frege.memoryjavac.JavaUtils.compile :: String -> String -> MemoryClassLoader -> 
-	IO (Either ScriptException MemoryClassLoader) 
 
 data JMap k v = native java.util.Map where
   native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
@@ -238,29 +237,31 @@ data HashMap k v = native java.util.HashMap where
   native new :: () -> STMutable s (HashMap k v)
   
   
-javacPass :: StringWriter -> StG (String, Int)
-javacPass src = do
+javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
+javacPass compiler src = do
   g <- getST
   let !packName = g.sub.thisPack.unpack g
       !loader = g.sub.loader
   !jsrc <- doio $ src.toString
-  memloader <- doio $ asMemoryClassLoader loader
-  res <- doio $ javac jsrc packName memloader
-  case res of
-    Left err -> do
-            U.error Position.null (TEXT err.getMessage)
+  isSuccess <- doio $ compiler.compile jsrc packName
+  if !isSuccess
+    then do
+            msg <- doio $ compiler.error
+            U.error Position.null (TEXT msg)
             return ("javac", 1)
-    Right loader -> do
-      changeST Global.{sub <- SubSt.{loader=loader}} --Classloader with compiled class
+    else 
       return ("javac", 0)
   
     
 compile :: String -> [String] -> [String] -> PrintWriter -> 
-  StringWriter -> MemoryClassLoader -> String -> String  -> String -> IO (SourceInfo, Global)
-compile src paths libpaths !ow !jw !loader !predefs !moduleName !modulePrelude = do
+  StringWriter -> MutableIO MemoryJavaCompiler -> String -> String  -> String -> IO (SourceInfo, Global)
+compile src paths libpaths !ow !jw !compiler !predefs !moduleName !modulePrelude = do
   let flags = Flags.fromList [IDE]
-  let steps = passes jw moduleName
-  runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName modulePrelude
+  let steps = passes jw moduleName compiler
+  loader <- compiler.classLoader
+  urlArr <- URLArray.new 0
+  urlClassLoader <- URLClassLoader.new urlArr loader
+  runcompiler src predefs paths flags "." libpaths "" ow urlClassLoader steps moduleName modulePrelude
   
 isDefined :: [DefinitionT] -> Definition -> Bool
 isDefined defs (_@TypDcl{name=x}) = isJust . find (matching x) $ defs
@@ -297,26 +298,45 @@ isFunDefined decls ((_@FunDcl{name=x}):_) = isJust . find (pred x) $ map head de
 isFunDefined _ _ = false
 
 exprType :: Global -> String -> String    
-exprType g compilationId = let symbols = EU.symbols g.thisTab in 
+exprType g compilationId = let symbols = getSymbols g.thisTab in 
   case (find (existsVarSymbol compilationId) symbols) of
     Just s -> EU.label g s
     Nothing -> ""
     
 lookupVarSymbol :: Symtab -> String -> Maybe Symbol    
-lookupVarSymbol symtab name = let symbols = (EU.symbols symtab) in 
-  find (existsVarSymbol name) symbols
+lookupVarSymbol symtab name = find (existsVarSymbol name) $ getSymbols symtab
 
 getSymbolType :: Symbol -> Global -> String
 getSymbolType SymI{typ} !g = EU.verbose g typ
 getSymbolType SymV{typ} !g = EU.verbose g typ
 getSymbolType SymD{typ} !g = EU.verbose g typ
+getSymbolType SymL{alias} !g = maybe "" (flip getSymbolType g) $ alias.findit g
 getSymbolType _ _ = ""
 
 showSymbols :: Global -> [String]
-showSymbols g  = map (EU.label g) $ EU.symbols g.thisTab
+showSymbols g  = map (EU.label g) $ getSymbols g.thisTab
   
-existsVarSymbol name (s@(SymV {name=x})) = (QName.base x) == name
+--existsVarSymbol name (s@(SymV {name=x})) | traceLn $ "SymV: " ++ name ++ x.base = x.base == name
+--existsVarSymbol name (s@(SymL{name=x})) | traceLn $ "SymL: " ++ name ++ x.base = x.base == name
+--existsVarSymbol _ _ | traceLn "Other type of symbol!" = false
+existsVarSymbol name SymV{name=x} = x.base == name
+existsVarSymbol name SymL{name=x} = x.base == name
 existsVarSymbol _ _ = false
+
+getSymbols :: Symtab -> [Symbol]
+getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
+    where
+        positionAndName a b = case Symbol.pos a <=> Symbol.pos b of
+                                    Eq -> comparing (QName.base • Symbol.name) a b
+                                    ne -> ne 
+        wanted :: Symbol -> Bool 
+        wanted sym 
+            | sym.{alias?}                       = true
+            | Local{} <- sym.name                = true
+            -- sym.vis == Private                 = false
+            | sym.name.base ~ ´^(chg|upd|has|let|anon|lc)\$´ = false
+            | otherwise                          = true
+
 
 iparsePass = do
     g       <- getST
@@ -359,7 +379,7 @@ lexPass = do
                             . SubSt.{definitions = []}
                             . SubSt.{packageDoc  = Nothing}
                             . SubSt.{thisPack    = Pack.new ""}}
-    changeST Global.{locals = Nil, typEnv = []}
+    changeST Global.{locals = Tree.empty, typEnv = []}
     g <- getST
     let opts = g.options
     tokens <- Lex.passCS (CharSeq.fromString opts.source) getOperators
@@ -373,6 +393,7 @@ isVariable :: Global -> Symbol -> Bool
 isVariable !g SymV{name,typ} = case typ.rho of
   RhoFun _ _ _ = false
   RhoTau ctx _ = ctx == [] 
+isVariable !g SymL{alias} = maybe false (isVariable g) $ alias.findit g
 isVariable _ _ = false
 
 isIO :: Global -> Symbol -> Bool
