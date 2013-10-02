@@ -5,8 +5,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Scanner;
-import java.util.Map;
-import java.util.HashMap;
 
 import javax.script.AbstractScriptEngine;
 import javax.script.Bindings;
@@ -15,22 +13,17 @@ import javax.script.CompiledScript;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineFactory;
-import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 import javax.script.SimpleBindings;
 
+import frege.interpreter.FregeInterpreter.TCompilationResult;
 import frege.prelude.PreludeBase.TEither;
 import frege.prelude.PreludeBase.TList;
 import frege.prelude.PreludeBase.TList.DCons;
 import frege.prelude.PreludeBase.TMaybe;
-import frege.runtime.Func1;
+import frege.runtime.Lambda;
 import frege.runtime.Lazy;
-import frege.runtime.Delayed;
-
-import frege.memoryjavac.MemoryClassLoader;
 import frege.scriptengine.FregeScriptEngine;
-
-import static frege.interpreter.FregeInterpreter.TCompilationResult;
 
 public class JFregeScriptEngine extends AbstractScriptEngine implements
 		Compilable {
@@ -48,7 +41,7 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 
 	public JFregeScriptEngine(final ScriptEngineFactory factory) {
 		this.factory = factory;
-		final Func1 io = (Func1) FregeScriptEngine.load(initScript,
+		final Lambda io = FregeScriptEngine.load(initScript,
 				context);
 		final TEither intpRes = io.apply(1).result().<TEither>forced();
 		final int cons = intpRes._constructor();
@@ -56,18 +49,14 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 			final TList errs = getLeft(intpRes);
 			final List<String> errMsgs = toJavaList(errs);
 			throw new RuntimeException(errMsgs.toString());
-		} else {
-			final Object right = getRight(intpRes);
-			final MemoryClassLoader loader = (MemoryClassLoader) right;
-			context.setAttribute("classes", loader.getClasses(), ScriptContext.ENGINE_SCOPE);
 		}
 	}
 
 	@Override
 	public Object eval(final String script, final ScriptContext context)
 			throws ScriptException {
-		final Func1 res = (Func1) FregeScriptEngine.eval(script, context);
-		final TEither intpRes = res.apply(1).<TEither> forced();
+		final Lambda res = FregeScriptEngine.eval(script, context);
+		final TEither intpRes = res.apply(1).result().<TEither>forced();
 		final int cons = intpRes._constructor();
 		if (cons == 0) {
 			final TList errs = getLeft(intpRes);
@@ -173,7 +162,7 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 
 	@Override
 	public CompiledScript compile(final String script) throws ScriptException {
-		final Func1 io = (Func1) FregeScriptEngine.compiledScript(script, getContext());
+		final Lambda io = FregeScriptEngine.compiledScript(script, getContext());
 		final TEither intpRes = io.apply(1).result().<TEither>forced();
 		final int cons = intpRes._constructor();
 		final TCompilationResult res;
@@ -189,7 +178,7 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 
 			@Override
 			public Object eval(final ScriptContext context) throws ScriptException {
-				final Func1 io = (Func1) FregeScriptEngine.evalCompiledScript(res, script, context);
+				final Lambda io = FregeScriptEngine.evalCompiledScript(res, script, context);
 				final TEither intpRes = io.apply(1).result().<TEither>forced();
 				final int cons = intpRes._constructor();
 				if (cons == 0) {

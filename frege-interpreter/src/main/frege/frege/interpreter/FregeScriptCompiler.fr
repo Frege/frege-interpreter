@@ -221,10 +221,15 @@ derive Exceptional ScriptException
 
 data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
   native new :: ClassLoader -> MutableIO (JMap String ByteArr) -> IOMutable MemoryJavaCompiler 
-  native compile :: MutableIO MemoryJavaCompiler -> String -> String -> IO Bool
-  native classLoader ::  MutableIO MemoryJavaCompiler -> IO ClassLoader
-  native error :: MutableIO MemoryJavaCompiler -> IO String
-  native classes :: MutableIO MemoryJavaCompiler -> IOMutable (JMap String ByteArr)
+  native compile :: MutableIO MemoryJavaCompiler -> String -> String -> IOMutable JavaCompilationInfo
+  native lastCompilation :: MutableIO MemoryJavaCompiler -> IOMutable JavaCompilationInfo
+  native classLoader :: MutableIO MemoryJavaCompiler -> IO ClassLoader
+  
+data JavaCompilationInfo = native frege.memoryjavac.CompilationInfo where
+  native isSuccess :: MutableIO JavaCompilationInfo -> IO Bool
+  native errorsAsString :: MutableIO JavaCompilationInfo -> IO String
+  native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
+  native classes :: MutableIO JavaCompilationInfo -> IOMutable (JMap String ByteArr)
   
 data ByteArr = mutable native "byte[]"
 
@@ -243,10 +248,11 @@ javacPass compiler src = do
   let !packName = g.sub.thisPack.unpack g
       !loader = g.sub.loader
   !jsrc <- doio $ src.toString
-  isSuccess <- doio $ compiler.compile jsrc packName
+  res <- doio $ compiler.compile jsrc packName
+  isSuccess <- doio $ res.isSuccess
   if !isSuccess
     then do
-            msg <- doio $ compiler.error
+            msg <- doio $ res.errorsAsString
             U.error Position.null (TEXT msg)
             return ("javac", 1)
     else 
@@ -256,6 +262,7 @@ javacPass compiler src = do
 compile :: String -> [String] -> [String] -> PrintWriter -> 
   StringWriter -> MutableIO MemoryJavaCompiler -> String -> String  -> String -> IO (SourceInfo, Global)
 compile src paths libpaths !ow !jw !compiler !predefs !moduleName !modulePrelude = do
+  --println $ "compiling:\n" ++ src
   let flags = Flags.fromList [IDE]
   let steps = passes jw moduleName compiler
   loader <- compiler.classLoader

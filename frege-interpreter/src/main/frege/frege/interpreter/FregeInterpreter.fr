@@ -41,7 +41,7 @@ compile src = do
   javaSource <- liftIO $ javaSourceStringWriter.toString
   if (Global.errors compilerState == 0) then do --No compilation errors
     javaSource <- liftIO $ javaSourceStringWriter.toString
-    newclasses <- liftIO $ javac.classes
+    newclasses <- liftIO $ javac.lastCompilation >>= JavaCompilationInfo.classes
     Interpreter.put $ s.{classes=newclasses}
     return . CompilationSuccess $ CompilationInfo{
                                         javaSource=javaSource, 

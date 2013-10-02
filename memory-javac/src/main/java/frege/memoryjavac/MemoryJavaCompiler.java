@@ -1,331 +1,267 @@
 package frege.memoryjavac;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URI;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
-import javax.tools.Diagnostic;
-import javax.tools.DiagnosticCollector;
-import javax.tools.FileObject;
-import javax.tools.ForwardingJavaFileManager;
-import javax.tools.JavaCompiler;
-import javax.tools.JavaCompiler.CompilationTask;
-import javax.tools.JavaFileManager;
-import javax.tools.JavaFileObject;
-import javax.tools.JavaFileObject.Kind;
-import javax.tools.SimpleJavaFileObject;
-import javax.tools.StandardJavaFileManager;
-import javax.tools.StandardLocation;
-import javax.tools.ToolProvider;
+import org.eclipse.jdt.core.compiler.CharOperation;
+import org.eclipse.jdt.internal.compiler.ClassFile;
+import org.eclipse.jdt.internal.compiler.CompilationResult;
+import org.eclipse.jdt.internal.compiler.Compiler;
+import org.eclipse.jdt.internal.compiler.ICompilerRequestor;
+import org.eclipse.jdt.internal.compiler.IErrorHandlingPolicy;
+import org.eclipse.jdt.internal.compiler.IProblemFactory;
+import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
+import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
+import org.eclipse.jdt.internal.compiler.classfmt.ClassFileReader;
+import org.eclipse.jdt.internal.compiler.classfmt.ClassFormatException;
+import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
+import org.eclipse.jdt.internal.compiler.env.INameEnvironment;
+import org.eclipse.jdt.internal.compiler.env.NameEnvironmentAnswer;
+import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
+import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
 
+/**
+ * A wrapper around Eclipse JDT compiler. This is an in-memory Java Compiler;
+ * The byte codes are stored in memory.
+ *
+ */
 public class MemoryJavaCompiler {
-    private final JavaCompiler compiler;
-    private final MemoryClassLoader classLoader;
-    private final Iterable<String> options;
-    private final MemoryFileManager fileManager;
-    private final DiagnosticCollector<JavaFileObject> diagnostics;
+  private final CompilerOptions options;
+  private final IErrorHandlingPolicy errorHandlingPolicy;
+  private final IProblemFactory problemFactory;
+  private CompilationInfo lastCompilation;
+  private final MemoryClassLoader classLoader;
 
-    public MemoryJavaCompiler(final Iterable<String> options,
-            final ClassLoader parent) {
-        this(options, new MemoryClassLoader(parent));
+  public MemoryJavaCompiler() {
+    this(Thread.currentThread().getContextClassLoader(),
+        Collections.<String, byte[]>emptyMap());
+  }
+
+  public MemoryJavaCompiler(
+      final ClassLoader parent,
+      final Map<String, byte[]> bytecodes) {
+    this.options = getCompilerOptions();
+    this.errorHandlingPolicy = getErrorHandlingPolicy();
+    this.problemFactory = new DefaultProblemFactory(Locale.US);
+    this.lastCompilation = new CompilationInfo(
+        Collections.<CompilationResult>emptyList(),
+        Collections.<String, byte[]>emptyMap(),
+        parent);
+    this.classLoader = new MemoryClassLoader(
+        parent, bytecodes);
+  }
+
+  public CompilationInfo compile(final Map<String, CharSequence> sources) {
+    final ICompilationUnit[] compilationUnits = getCompilationUnits(sources);
+    final CompilerRequestor resultListener = new CompilerRequestor(classLoader);
+    final Compiler compiler = new Compiler(classLoader, errorHandlingPolicy,
+        options, resultListener, problemFactory);
+    compiler.compile(compilationUnits);
+    this.lastCompilation = new CompilationInfo(resultListener.results(),
+        classLoader.classes(), classLoader);
+    return lastCompilation;
+  }
+
+  private ICompilationUnit[] getCompilationUnits(
+      final Map<String, CharSequence> sources) {
+    final List<ICompilationUnit> compilationUnits = new ArrayList<ICompilationUnit>();
+    for (final Map.Entry<String, CharSequence> source : sources.entrySet()) {
+      compilationUnits.add(new CompilationUnit(source.getValue().toString()
+          .toCharArray(), source.getKey(), "UTF-8"));
+    }
+    return compilationUnits
+        .toArray(new CompilationUnit[compilationUnits.size()]);
+  }
+
+  public CompilationInfo compile(final CharSequence sourceCode,
+      final String className) {
+    final Map<String, CharSequence> sources = new HashMap<String, CharSequence>();
+    sources.put(getFileName(className), sourceCode);
+    return compile(sources);
+  }
+
+  private String getFileName(final String className) {
+    return className.replace('.', '/') + ".java";
+  }
+
+  private static IErrorHandlingPolicy getErrorHandlingPolicy() {
+    return new IErrorHandlingPolicy() {
+      @Override
+      public boolean proceedOnErrors() {
+        return true;
+      }
+
+      @Override
+      public boolean stopOnFirstError() {
+        return false;
+      }
+    };
+
+  }
+
+  public CompilationInfo lastCompilation() {
+    return lastCompilation;
+  }
+
+  public ClassLoader classLoader() {
+    return classLoader;
+  }
+
+
+  /*
+   * Eclipse compiler options
+   */
+  private static CompilerOptions getCompilerOptions() {
+    final CompilerOptions options = new CompilerOptions();
+    final long jdk7 = ClassFileConstants.JDK1_7;
+    options.sourceLevel = jdk7;
+    options.originalSourceLevel = jdk7;
+    options.complianceLevel = jdk7;
+    options.originalComplianceLevel = jdk7;
+    options.defaultEncoding = "UTF-8";
+    options.targetJDK = jdk7;
+    return options;
+  }
+
+  private static class MemoryClassLoader extends URLClassLoader implements
+      INameEnvironment {
+    private final Map<String, byte[]> classes;
+
+    public MemoryClassLoader(final ClassLoader parent,
+        final Map<String, byte[]> classFiles) {
+      super(new URL[0], parent);
+      this.classes = new HashMap<String, byte[]>(classFiles);
     }
 
-    private MemoryJavaCompiler(final Iterable<String> options,
-            final MemoryClassLoader loader) {
-        this.compiler = ToolProvider.getSystemJavaCompiler();
-        this.classLoader = loader;
-        this.options = options;
-        this.diagnostics =
-                new DiagnosticCollector<JavaFileObject>();
-        this.fileManager = new MemoryFileManager(
-                compiler.getStandardFileManager(diagnostics, null, null),
-                loader);
+    @Override
+    protected Class<?> findClass(final String className)
+        throws ClassNotFoundException {
+      final byte[] bytecode = getByteCode(className);
+      if (bytecode != null) {
+        return defineClass(className, bytecode, 0, bytecode.length);
+      }
+      return super.findClass(className);
     }
 
-    public MemoryJavaCompiler() {
-        this(Collections.<String>emptyList(), new MemoryClassLoader(null));
+    private byte[] getByteCode(final String className) {
+      return classes.get(className);
     }
 
-    public MemoryJavaCompiler(final ClassLoader parent,
-            final Map<String, byte[]> classes) {
-        this(Collections.<String>emptyList(), classes, parent);
+    @Override
+    public void cleanup() {
+
     }
 
-    public MemoryJavaCompiler(
-            final Map<String, byte[]> classes) {
-        this(Collections.<String>emptyList(), classes, null);
-    }
-
-    public MemoryJavaCompiler(
-            final Iterable<String> options,
-            final Map<String, byte[]> classes) {
-        this(options, classes, null);
-    }
-
-    public MemoryJavaCompiler(
-            final Iterable<String> options,
-            final Map<String, byte[]> classes,
-            final ClassLoader parent) {
-        this(options,
-                MemoryClassLoader.fromBytecodes(parent, classes));
-    }
-
-    public boolean compile(final String source, final String className) {
-        final Map<String, String> sources = new HashMap<>();
-        sources.put(className, source);
-        return compile(sources);
-    }
-
-    public synchronized boolean compile(final Map<String, String> sources) {
-        final List<JavaFileObject> compilationUnits = new ArrayList<JavaFileObject>();
-        for (final Map.Entry<String, String> entry: sources.entrySet()) {
-            final String qualifiedClassName = entry.getKey();
-            final String javaSource = entry.getValue();
-            if (javaSource != null) {
-                final int dotPos = qualifiedClassName.lastIndexOf('.');
-                final String className = dotPos == -1 ? qualifiedClassName
-                        : qualifiedClassName.substring(dotPos + 1);
-                final String packageName = dotPos == -1 ? "" : qualifiedClassName
-                        .substring(0, dotPos);
-                final MemoryFileObject source = new MemoryFileObject(className,
-                        javaSource);
-                compilationUnits.add(source);
-                fileManager.putFileForInput(StandardLocation.SOURCE_PATH, packageName,
-                        className + ".java", source);
-            }
+    @Override
+    public InputStream getResourceAsStream(final String name) {
+      final InputStream contents = super.getResourceAsStream(name);
+      if (contents != null) {
+        return contents;
+      }
+      if (name.endsWith(".class")) {
+        final String noSuffix = name.substring(0, name.lastIndexOf('.'));
+        final String relativeName;
+        if (name.startsWith("/")) {
+          relativeName = noSuffix.substring(1);
+        } else {
+          relativeName = noSuffix;
         }
-        final CompilationTask task = compiler.getTask(null, fileManager, diagnostics,
-                options, null, compilationUnits);
-        final Boolean result = task.call();
-        return result;
+        final String className = relativeName.replace('/', '.');
+        final byte[] bytecode = getByteCode(className);
+        if (bytecode != null) {
+          return new ByteArrayInputStream(bytecode);
+        }
+      }
+      return null;
+    }
+
+    @Override
+    public NameEnvironmentAnswer findType(final char[][] qualifiedTypeName) {
+      final String className = CharOperation.toString(qualifiedTypeName);
+      final byte[] bytecode = getByteCode(className);
+      if (bytecode != null) {
+        try {
+          final ClassFileReader reader = new ClassFileReader(bytecode, null);
+          return new NameEnvironmentAnswer(reader, null);
+        } catch (final ClassFormatException e) {
+        }
+      } else {
+        final String resourceName = className.replace('.', '/') + ".class";
+        final InputStream contents = super.getResourceAsStream(resourceName);
+        if (contents != null) {
+          ClassFileReader reader;
+          try {
+            reader = ClassFileReader.read(contents, className);
+            return new NameEnvironmentAnswer(reader, null);
+          } catch (final Exception e) {
+          }
+        }
+      }
+      return null;
+    }
+
+    @Override
+    public NameEnvironmentAnswer findType(final char[] typeName,
+        final char[][] packageName) {
+      return findType(CharOperation.arrayConcat(packageName, typeName));
+    }
+
+    @Override
+    public boolean isPackage(final char[][] arg0, final char[] arg1) {
+      return Character.isLowerCase(arg1[0]);
+    }
+
+    public void addClasses(final Map<String, byte[]> bytecodes) {
+      this.classes.putAll(bytecodes);
     }
 
     public Map<String, byte[]> classes() {
-        return classLoader.getBytecodes();
+      return Collections.unmodifiableMap(classes);
     }
 
-    public ClassLoader classLoader() {
-        return classLoader;
+  }
+
+  private static class CompilerRequestor implements ICompilerRequestor {
+    private final MemoryClassLoader classLoader;
+    private final List<CompilationResult> results;
+
+    public CompilerRequestor(final MemoryClassLoader classLoader) {
+      this.classLoader = classLoader;
+      this.results = new ArrayList<CompilationResult>();
     }
 
-    public String error() {
-        final StringBuilder error = new StringBuilder();
-        for (final Diagnostic<? extends JavaFileObject> diagnostic : diagnostics
-                .getDiagnostics()) {
-            if (diagnostic.getKind() == Diagnostic.Kind.ERROR) {
-                error.append(diagnostic.toString());
-            }
-        }
-        return error.toString();
-    }
-
-    public DiagnosticCollector<JavaFileObject> diagnostics() {
-        return diagnostics;
-    }
-
-    private static class MemoryFileManager extends ForwardingJavaFileManager<JavaFileManager> {
-        private final MemoryClassLoader classLoader;
-        private final Map<URI, JavaFileObject> fileObjects = new HashMap<URI, JavaFileObject>();
-
-        public MemoryFileManager(final StandardJavaFileManager fileManager, final MemoryClassLoader classLoader) {
-            super(fileManager);
-            this.classLoader = classLoader;
-        }
-        @Override
-        public JavaFileObject getJavaFileForOutput(final Location location,
-                final String name,
-                final JavaFileObject.Kind kind, final FileObject sibling) throws IOException {
-            final MemoryFileObject mbc = new MemoryFileObject(name, kind);
-            classLoader.add(name, mbc);
-            return mbc;
-        }
-
-        @Override
-        public String inferBinaryName(final Location loc, final JavaFileObject file) {
-           String result;
-           if (file instanceof MemoryFileObject)
-              result = file.getName();
-           else
-              result = super.inferBinaryName(loc, file);
-           return result;
-        }
-
-        @Override
-        public Iterable<JavaFileObject> list(final Location location,
-                final String packageName, final Set<Kind> kinds,
-                final boolean recurse) throws IOException {
-            final Iterable<JavaFileObject> result = super.list(location, packageName, kinds,
-                    recurse);
-              final LinkedList<JavaFileObject> files = new LinkedList<JavaFileObject>();
-              if (location == StandardLocation.CLASS_PATH
-                    && kinds.contains(JavaFileObject.Kind.CLASS)) {
-                 for (final JavaFileObject file : fileObjects.values()) {
-                    if (file.getKind() == Kind.CLASS && file.getName().startsWith(packageName))
-                       files.add(file);
-                 }
-                 files.addAll(classLoader.files());
-              } else if (location == StandardLocation.SOURCE_PATH
-                    && kinds.contains(JavaFileObject.Kind.SOURCE)) {
-                 for (final JavaFileObject file : fileObjects.values()) {
-                    if (file.getKind() == Kind.SOURCE && file.getName().startsWith(packageName))
-                       files.add(file);
-                 }
-              }
-              for (final JavaFileObject file : result) {
-                 files.add(file);
-              }
-              return files;
-        }
-
-        @Override
-        public FileObject getFileForInput(final Location location, final String packageName,
-                final String relativeName) throws IOException {
-            final FileObject o = fileObjects.get(uri(location, packageName, relativeName));
-            if (o != null)
-               return o;
-            return super.getFileForInput(location, packageName, relativeName);
-        }
-
-        private static URI uri(final Location location, final String packageName,
-                final String relativeName) {
-            return URI.create(location.getName() + '/' + packageName + '/'
-                    + relativeName);
-        }
-        public void putFileForInput(final StandardLocation location, final String packageName,
-                final String relativeName, final JavaFileObject file) {
-            final URI uri = uri(location, packageName, relativeName);
-             fileObjects.put(uri, file);
-          }
-
-        @Override
-        public ClassLoader getClassLoader(final Location location) {
-            return classLoader;
-        }
+    @Override
+    public void acceptResult(final CompilationResult result) {
+      results.add(result);
+      classLoader.addClasses(classes(result));
 
     }
 
-    private static class MemoryFileObject extends SimpleJavaFileObject {
-        private ByteArrayOutputStream baos;
-        private CharSequence source;
-
-        public MemoryFileObject(final String name, final String source) {
-            super(URI.create("file:///" + name + ".java"), Kind.SOURCE);
-            this.source = source;
+    private static Map<String, byte[]> classes(final CompilationResult result) {
+      final Map<String, byte[]> classes = new HashMap<String, byte[]>();
+      if (!result.hasErrors()) {
+        for (final ClassFile cls : result.getClassFiles()) {
+          final String className = CharOperation
+              .toString(cls.getCompoundName());
+          classes.put(className, cls.getBytes());
         }
-
-        public MemoryFileObject(final String name, final Kind kind) {
-            super(URI.create(name), kind);
-        }
-
-        @Override
-        public OutputStream openOutputStream() {
-            baos = new ByteArrayOutputStream();
-            return baos;
-        }
-
-        @Override
-        public CharSequence getCharContent(final boolean ignoreEncodingErrors) {
-            return source;
-        }
-
-        @Override
-        public InputStream openInputStream() {
-            return new ByteArrayInputStream(getBytecodes());
-        }
-
-        public byte[] getBytecodes() {
-            return baos.toByteArray();
-        }
+      }
+      return classes;
     }
 
-    private static class MemoryClassLoader extends ClassLoader {
-       private final Map<String, MemoryFileObject> classes;
-
-       public MemoryClassLoader(final ClassLoader parentClassLoader) {
-           this(parentClassLoader, new HashMap<String, MemoryFileObject>());
-       }
-
-       public MemoryClassLoader(final ClassLoader parentClassLoader,
-               final Map<String, MemoryFileObject> classes) {
-           super(parentClassLoader);
-           this.classes = new HashMap<>(classes);
-        }
-
-       public Collection<MemoryFileObject> files() {
-          return Collections.unmodifiableCollection(classes.values());
-       }
-
-       public Map<String, byte[]> getBytecodes() {
-           final Map<String, byte[]> bytecodes = new HashMap<>();
-           for (final Map.Entry<String, MemoryFileObject> clazz: classes.entrySet()) {
-               bytecodes.put(clazz.getKey(), clazz.getValue().getBytecodes());
-           }
-           return bytecodes;
-       }
-
-       @Override
-       protected Class<?> findClass(final String qualifiedClassName)
-             throws ClassNotFoundException {
-          final MemoryFileObject file = classes.get(qualifiedClassName);
-          final Class<?> clazz;
-          if (file != null) {
-              final byte[] bytes = file.getBytecodes();
-              clazz = defineClass(qualifiedClassName, bytes, 0, bytes.length);
-          } else {
-              clazz = super.findClass(qualifiedClassName);
-          }
-          return clazz;
-       }
-
-       void add(final String qualifiedClassName, final MemoryFileObject javaFile) {
-          classes.put(qualifiedClassName.replace('/', '.'), javaFile);
-       }
-
-       public static MemoryClassLoader fromBytecodes(final ClassLoader parentClassLoader,
-               final Map<String, byte[]> bytecodes) {
-           final Map<String, MemoryFileObject> classes = new HashMap<>();
-           for (final Map.Entry<String, byte[]> bytecode: bytecodes.entrySet()) {
-               final MemoryFileObject fileObject = new MemoryFileObject(
-                       bytecode.getKey(), JavaFileObject.Kind.CLASS);
-               try {
-                   fileObject.openOutputStream().write(bytecode.getValue());
-                   classes.put(bytecode.getKey(), fileObject);
-               } catch (final IOException e) {
-                   throw new RuntimeException(e);
-               }
-           }
-           return new MemoryClassLoader(parentClassLoader, classes);
-        }
-
-       @Override
-       protected synchronized Class<?> loadClass(final String name, final boolean resolve)
-             throws ClassNotFoundException {
-          return super.loadClass(name, resolve);
-       }
-
-       @Override
-       public InputStream getResourceAsStream(final String name) {
-          if (name.endsWith(".class")) {
-             final String qualifiedClassName = name.substring(0,
-                   name.length() - ".class".length()).replace('/', '.');
-             final MemoryFileObject file = classes.get(qualifiedClassName);
-             if (file != null) {
-                return new ByteArrayInputStream(file.getBytecodes());
-             }
-          }
-          return super.getResourceAsStream(name);
-       }
+    public List<CompilationResult> results() {
+      return Collections.unmodifiableList(results);
     }
+
+  }
+
 
 }

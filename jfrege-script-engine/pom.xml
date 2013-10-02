@@ -30,6 +30,12 @@
   </build>
   <dependencies>
     <dependency>
+      <groupId>com.theoryinpractise.frege</groupId>
+      <artifactId>frege-maven-plugin</artifactId>
+      <classifier>${frege.version}</classifier>
+      <version>${frege.plugin.version}</version>
+    </dependency>
+    <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>frege-script-engine</artifactId>
       <version>${project.version}</version>
