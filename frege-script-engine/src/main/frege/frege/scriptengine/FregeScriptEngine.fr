@@ -1,5 +1,6 @@
 module frege.scriptengine.FregeScriptEngine where
 
+import frege.compiler.Data (Symbol)
 import frege.interpreter.FregeScriptCompiler
 import frege.interpreter.FregeInterpreter
 import frege.java.Net
@@ -19,13 +20,10 @@ data Bindings = mutable native javax.script.Bindings where
 
 initScript = "import scripting.Setting"
 
-native curThread Thread.currentThread :: () -> IO Thread
-native curClassLoader getContextClassLoader :: Thread -> IO ClassLoader
-    
 initInterpreterState :: ScriptContext -> IO InterpreterState 
 initInterpreterState session = do
   urlarr <- URLArray.new 0
-  loader <- curThread () >>= curClassLoader >>= URLClassLoader.new urlarr
+  loader <- ClassLoader.current >>= URLClassLoader.new urlarr
   classesMaybe <- session.getAttribute "classes" ScriptContext.engineScope
   classes <- maybe (HashMap.new () :: IOMutable (JMap String ByteArr)) asClassesMap classesMaybe
   strMaybe <- session.getAttribute "script" ScriptContext.engineScope
@@ -108,6 +106,9 @@ fetchVariableValue var g context = do
         Nothing -> return $ Right Nothing
         Just symbol -> fetchSymbolValue var symbol g context
 
+fetchSymbolValue var SymL{alias} g context = 
+    maybe (return $ Right Nothing) f $ alias.findit g where
+      f s = fetchSymbolValue s.name.base s g context
 fetchSymbolValue var symbol g context | isVariable g symbol = do
     state <- Interpreter.get
     bindingseither <- liftIO $ getBindings g.sub.loader
@@ -171,10 +172,4 @@ native asString "(java.lang.String)" :: Object -> IO String
 native asURLClassLoader "(java.net.URLClassLoader)" :: Object -> IO URLClassLoader
 native asBindingsMap "(java.util.Map)" :: Object -> IOMutable (JMap String Object)
 
-main _ = do
-  context <- SimpleScriptContext.new ()
-  res <- load "module t.Hello where {x = 4;}" context
-  case res of
-    Left errs -> println errs
-    _ -> println "successful"
     

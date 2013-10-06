@@ -111,7 +111,7 @@ public class MemoryJavaCompiler {
     return lastCompilation;
   }
 
-  public ClassLoader classLoader() {
+  public URLClassLoader classLoader() {
     return classLoader;
   }
 

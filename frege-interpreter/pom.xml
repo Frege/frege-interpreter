@@ -1,13 +1,12 @@
 <?xml version="1.0"?>
 <project
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
-    xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+  xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>frege</groupId>
     <artifactId>frege-scripting</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <relativePath>../pom.xml</relativePath>
+    <version>1.0.0</version>
   </parent>
   <artifactId>frege-interpreter</artifactId>
   <packaging>jar</packaging>
@@ -20,7 +19,6 @@
       <plugin>
         <groupId>com.theoryinpractise.frege</groupId>
         <artifactId>frege-maven-plugin</artifactId>
-        <version>${frege.plugin.version}</version>
         <executions>
           <execution>
             <id>compile</id>
@@ -33,7 +31,7 @@
         <configuration>
           <inline>true</inline>
           <hints>true</hints>
-          <includeStale>false</includeStale>                    
+          <includeStale>false</includeStale>
         </configuration>
       </plugin>
       <plugin>
@@ -61,14 +59,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-	<groupId>org.eclipse.jdt.core.compiler</groupId>
-	<artifactId>ecj</artifactId>
-	<version>4.2.2</version>
+      <groupId>org.eclipse.jdt.core.compiler</groupId>
+      <artifactId>ecj</artifactId>
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>memory-javac</artifactId>
-      <version>1.0-SNAPSHOT</version>
+      <version>${project.version}</version>
     </dependency>
   </dependencies>
 </project>

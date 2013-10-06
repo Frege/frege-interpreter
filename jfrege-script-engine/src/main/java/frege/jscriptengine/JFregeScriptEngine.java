@@ -13,6 +13,7 @@ import javax.script.CompiledScript;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineFactory;
+import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 import javax.script.SimpleBindings;
 
@@ -21,6 +22,7 @@ import frege.prelude.PreludeBase.TEither;
 import frege.prelude.PreludeBase.TList;
 import frege.prelude.PreludeBase.TList.DCons;
 import frege.prelude.PreludeBase.TMaybe;
+import frege.runtime.Delayed;
 import frege.runtime.Lambda;
 import frege.runtime.Lazy;
 import frege.scriptengine.FregeScriptEngine;
@@ -63,7 +65,14 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 			final List<String> errMsgs = toJavaList(errs);
 			throw new ScriptException(errMsgs.toString());
 		} else {
-			return getRightMaybe(intpRes);
+			final Object evalRes = getRightMaybe(intpRes);
+			final Object result;
+			if (evalRes instanceof Delayed) {
+			  result = ((Delayed) evalRes).result().forced();
+			} else {
+			  result = evalRes;
+			}
+			return result;
 		}
 	}
 
@@ -206,11 +215,12 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 	@Override
 	public void put(final String key, final Object value) {
 		final String[] nameAndType = key.split("::");
-		if (nameAndType.length == 0)
+		if (nameAndType.length < 2) {
+		  super.put(key, value);
 			return;
+		}
 		final String name = nameAndType[0].trim();
-		final String type = nameAndType.length > 1 ? nameAndType[1].trim()
-				: "Object";
+		final String type = nameAndType[1].trim();
 		final String script = (String) context.getAttribute("script",
 				ScriptContext.ENGINE_SCOPE);
 		final String newScript = String.format(
@@ -220,6 +230,5 @@ public class JFregeScriptEngine extends AbstractScriptEngine implements
 		context.setAttribute("script", newScript, ScriptContext.ENGINE_SCOPE);
 		super.put(name, value);
 	}
-
 
 }

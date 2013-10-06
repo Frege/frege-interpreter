@@ -223,7 +223,7 @@ data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
   native new :: ClassLoader -> MutableIO (JMap String ByteArr) -> IOMutable MemoryJavaCompiler 
   native compile :: MutableIO MemoryJavaCompiler -> String -> String -> IOMutable JavaCompilationInfo
   native lastCompilation :: MutableIO MemoryJavaCompiler -> IOMutable JavaCompilationInfo
-  native classLoader :: MutableIO MemoryJavaCompiler -> IO ClassLoader
+  native classLoader :: MutableIO MemoryJavaCompiler -> IO URLClassLoader
   
 data JavaCompilationInfo = native frege.memoryjavac.CompilationInfo where
   native isSuccess :: MutableIO JavaCompilationInfo -> IO Bool
@@ -266,9 +266,7 @@ compile src paths libpaths !ow !jw !compiler !predefs !moduleName !modulePrelude
   let flags = Flags.fromList [IDE]
   let steps = passes jw moduleName compiler
   loader <- compiler.classLoader
-  urlArr <- URLArray.new 0
-  urlClassLoader <- URLClassLoader.new urlArr loader
-  runcompiler src predefs paths flags "." libpaths "" ow urlClassLoader steps moduleName modulePrelude
+  runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName modulePrelude
   
 isDefined :: [DefinitionT] -> Definition -> Bool
 isDefined defs (_@TypDcl{name=x}) = isJust . find (matching x) $ defs
@@ -323,9 +321,6 @@ getSymbolType _ _ = ""
 showSymbols :: Global -> [String]
 showSymbols g  = map (EU.label g) $ getSymbols g.thisTab
   
---existsVarSymbol name (s@(SymV {name=x})) | traceLn $ "SymV: " ++ name ++ x.base = x.base == name
---existsVarSymbol name (s@(SymL{name=x})) | traceLn $ "SymL: " ++ name ++ x.base = x.base == name
---existsVarSymbol _ _ | traceLn "Other type of symbol!" = false
 existsVarSymbol name SymV{name=x} = x.base == name
 existsVarSymbol name SymL{name=x} = x.base == name
 existsVarSymbol _ _ = false
@@ -404,12 +399,12 @@ isVariable !g SymL{alias} = maybe false (isVariable g) $ alias.findit g
 isVariable _ _ = false
 
 isIO :: Global -> Symbol -> Bool
-isIO !g SymV{typ} = case (U.unAlias g $ RhoT.tau typ.rho) of
-  TApp (TCon {name}) _ = name.nicer g == "IO"
-  _ = false
+isIO g SymV{typ} = "ST RealWorld" `isPrefix` nice typ g where
+                      isPrefix = isPrefixOf `on` toList
+                      f `on` g = \x \y -> f (g x) (g y)
+isIO g SymL{alias} = maybe false (isIO g) $ alias.findit g
 isIO _ _ = false 
-
-isString !g SymV{typ} = case (U.unAlias g $ RhoT.tau typ.rho) of
-  TCon {name} = name.nicer g == "String"
-  _ = false
-isString _ _ = false
+  
+isString g SymV{typ} = nice typ g == "StringJ Char"
+isString g SymL{alias} = maybe false (isString g) $ alias.findit g
+isString g _ = false
