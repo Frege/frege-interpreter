@@ -11,8 +11,9 @@ using Eclipse JDT compiler so JDK is not required, just JRE is enough.
 ####JSR 223 Scripting support####
 
 This project also implements JSR 223, a scripting engine for Frege. 
+Frege Script Engine is available under releases page [here](https://github.com/Frege/frege-scripting/releases).
 
 ###How to get frege-scripting?###
 
-Frege REPL and [Online REPL](http://try.frege-lang.org/) make use of frege-scripting. The frege-scripting jar is part of frege-repl release 
-which can be obtained from [here](https://github.com/Frege/frege-repl/releases).
+Frege REPL and [Online REPL](http://try.frege-lang.org/) make use of frege-scripting and
+the frege-scripting binaries can be obtained from frege-repl releases page [here](https://github.com/Frege/frege-repl/releases).
