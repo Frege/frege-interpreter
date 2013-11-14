@@ -3,7 +3,9 @@ package frege.memoryjavac;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Map;
 
+import javax.script.ScriptContext;
 import javax.script.ScriptException;
 
 /**
@@ -52,6 +54,19 @@ public class JavaUtils {
 			exception.initCause(e);
 			throw exception;
 		}
+	}
+
+	public static void injectValues(final Map<String, Object> bindings,
+	    final Class<?> clazz) {
+	  try {
+	    for (final Map.Entry<String, Object> entry: bindings.entrySet()) {
+	      final Field field = clazz.getDeclaredField(entry.getKey());
+	      final Ref ref = (Ref) field.get(null);
+	      ref.set(entry.getValue());
+	    }
+	  } catch (final Exception e) {
+	    throw new RuntimeException(e);
+	  }
 	}
 
 }

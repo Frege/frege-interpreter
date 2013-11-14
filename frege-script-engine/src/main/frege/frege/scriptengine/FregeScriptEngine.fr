@@ -18,8 +18,6 @@ data SimpleScriptContext = mutable native javax.script.SimpleScriptContext where
 data Bindings = mutable native javax.script.Bindings where
     native asMap "(java.util.Map)" :: Bindings -> IOMutable (JMap String Object)
 
-initScript = "import scripting.Setting"
-
 initInterpreterState :: ScriptContext -> IO InterpreterState 
 initInterpreterState session = do
   urlarr <- URLArray.new 0
@@ -27,7 +25,7 @@ initInterpreterState session = do
   classesMaybe <- session.getAttribute "classes" ScriptContext.engineScope
   classes <- maybe (HashMap.new () :: IOMutable (JMap String ByteArr)) asClassesMap classesMaybe
   strMaybe <- session.getAttribute "script" ScriptContext.engineScope
-  currentScript <-  maybe (return initScript) asString strMaybe
+  currentScript <-  maybe (return "") asString strMaybe
   modulePreludeMaybe <- session.getAttribute "modulePrelude" ScriptContext.engineScope
   modulePrelude <- maybe (return "") asString modulePreludeMaybe
   let interpreterState = InterpreterState {
@@ -105,62 +103,34 @@ fetchVariableValue var g context = do
       case symbolMay of
         Nothing -> return $ Right Nothing
         Just symbol -> fetchSymbolValue var symbol g context
-
+        
 fetchSymbolValue var SymL{alias} g context = 
     maybe (return $ Right Nothing) f $ alias.findit g where
       f s = fetchSymbolValue s.name.base s g context
 fetchSymbolValue var symbol g context | isVariable g symbol = do
     state <- Interpreter.get
-    bindingseither <- liftIO $ getBindings g.sub.loader
-    case bindingseither of
-        Left err -> return . Left $ [err]
-        Right bindings -> do
-            liftIO $ putIntoBindings bindings context
-            v <- liftIO $ fetchFieldValue state.moduleName var g.sub.loader
-            case v of
-                Left err -> return $ Left [err.getMessage]
-                Right value -> return $ Right $ Just (asObject value)
+    bindings' <- liftIO $ ScriptContext.getAttribute context fregeBindingsKey ScriptContext.engineScope
+    bindings <- liftIO $ maybe (HashMap.new () :: IOMutable (JMap String Object)) asBindingsMap bindings'
+    isEmpty <- liftIO $ bindings.isEmpty
+    when !isEmpty $ do
+      clazz' <- liftIO $ g.sub.loader.loadClass preludeScriptClassName
+      let clazz = either throw id clazz'
+      liftIO $ injectValues bindings clazz
+    v <- liftIO $ fetchFieldValue state.moduleName var g.sub.loader
+    case v of
+        Left err -> return $ Left [err.getMessage]
+        Right value -> return $ Right $ Just (asObject value)
 fetchSymbolValue _ symbol g _ = return $ Right Nothing
 
-putIntoBindings :: MutableIO (JMap String Object) -> ScriptContext -> IO ()
-putIntoBindings bindings context = do
-    bs <- context.getBindings ScriptContext.engineScope
-    m <- bs.asMap 
-    bindings.putAll m
-    
+fregeBindingsKey = "frege.script.fregeBindings"
+preludeScriptClassName = "frege.script.PreludeScript"
+
 native fetchFieldValue frege.memoryjavac.JavaUtils.fieldValue :: 
   String -> String -> ClassLoader -> IO (Either ScriptException Object)
   
-getBindings :: URLClassLoader -> IO (String | (MutableIO (JMap String Object)))
-getBindings loader = do
-     v <- fieldValue "scripting.Setting" "engineMap" loader
-     case v of
-        Left err -> return . Left $ err.getMessage
-        Right obj -> asBindingsMap obj >>= return . Right 
-     
-data NoSuchFieldException = native java.lang.NoSuchFieldException
-data SecurityException = native java.lang.SecurityException
-data IllegalAccessException = native java.lang.IllegalAccessException
-
-derive Exceptional NoSuchFieldException
-derive Exceptional SecurityException    
-
-data Clazz = pure native java.lang.Class where
-    native getDeclaredField :: Clazz -> String -> IO Field throws NoSuchFieldException, SecurityException
+native injectValues frege.memoryjavac.JavaUtils.injectValues ::
+  Mutable s (JMap String Object) -> Class a -> ST s ()
   
-data Field = mutable native java.lang.reflect.Field where
-    native get :: Field -> Object -> IO Object throws IllegalAccessException
-
-native loadClass :: ClassLoader -> String -> IO Clazz throws ClassNotFoundException
-    
-fieldValue :: String -> String -> ClassLoader -> IO (Throwable | Object)
-fieldValue className variableName loader = 
-    (action >>= (return . Right)) `catch` (return . Left) where
-        action = do
-            clazz <- loadClass loader className
-            field <- clazz.getDeclaredField variableName
-            field.get $ asObject ""
-        
 pure native asObject "(Object)" :: a -> Object
   
 putContext :: ScriptContext -> String -> a -> Int -> IO ()
@@ -170,6 +140,4 @@ putContext context name value scope =
 native asClassesMap "(java.util.Map)" :: Object -> IOMutable (JMap String ByteArr)
 native asString "(java.lang.String)" :: Object -> IO String
 native asURLClassLoader "(java.net.URLClassLoader)" :: Object -> IO URLClassLoader
-native asBindingsMap "(java.util.Map)" :: Object -> IOMutable (JMap String Object)
-
-    
+native asBindingsMap "(java.util.Map)" :: Object -> STMutable s (JMap String Object)

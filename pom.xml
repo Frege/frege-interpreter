@@ -5,7 +5,7 @@
   <groupId>frege</groupId>
   <artifactId>frege-scripting</artifactId>
   <packaging>pom</packaging>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <name>frege-scripting</name>
   <url>https://github.com/Frege/frege-scripting</url>
   <modules>

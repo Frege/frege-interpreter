@@ -237,6 +237,7 @@ data JMap k v = native java.util.Map where
   native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
   native get ::  Mutable s (JMap k v) -> k -> ST s (Maybe v)
   native putAll ::  Mutable s (JMap k v) ->  Mutable s (JMap k v) -> ST s ()
+  native isEmpty :: Mutable s (JMap k v) -> ST s Bool
   
 data HashMap k v = native java.util.HashMap where
   native new :: () -> STMutable s (HashMap k v)
