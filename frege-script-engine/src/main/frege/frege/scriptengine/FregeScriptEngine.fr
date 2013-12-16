@@ -26,14 +26,12 @@ initInterpreterState session = do
   classes <- maybe (HashMap.new () :: IOMutable (JMap String ByteArr)) asClassesMap classesMaybe
   strMaybe <- session.getAttribute "script" ScriptContext.engineScope
   currentScript <-  maybe (return "") asString strMaybe
-  modulePreludeMaybe <- session.getAttribute "modulePrelude" ScriptContext.engineScope
-  modulePrelude <- maybe (return "") asString modulePreludeMaybe
   let interpreterState = InterpreterState {
       loader = loader,
       classes = classes,
       moduleName = "script.Main",
       currentScript = currentScript,
-      modulePrelude = modulePrelude
+      transformDefs = id
   }
   return interpreterState
 

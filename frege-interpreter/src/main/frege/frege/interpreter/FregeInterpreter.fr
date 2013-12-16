@@ -17,7 +17,7 @@ data InterpreterState = InterpreterState {
   classes :: MutableIO (JMap String ByteArr), --a Java Map for interop to call javac in native code
   moduleName :: String,
   currentScript :: String,
-  modulePrelude :: String
+  transformDefs :: [DefinitionT] -> [DefinitionT]
 } 
 
 data CompilationInfo = CompilationInfo {
@@ -37,7 +37,7 @@ compile src = do
   javaSourceStringWriter <- liftIO $ StringWriter.new () -- Java source will be written here
   javac <- liftIO $ MemoryJavaCompiler.new s.loader s.classes
   (sourceInfo, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
-    outWriter javaSourceStringWriter javac s.currentScript s.moduleName s.modulePrelude
+    outWriter javaSourceStringWriter javac s.currentScript s.moduleName s.transformDefs
   javaSource <- liftIO $ javaSourceStringWriter.toString
   if (Global.errors compilerState == 0) then do --No compilation errors
     javaSource <- liftIO $ javaSourceStringWriter.toString
