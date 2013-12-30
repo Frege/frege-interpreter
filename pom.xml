@@ -5,7 +5,7 @@
   <groupId>frege</groupId>
   <artifactId>frege-scripting</artifactId>
   <packaging>pom</packaging>
-  <version>1.0.1</version>
+  <version>1.0.2-SNAPSHOT</version>
   <name>frege-scripting</name>
   <url>https://github.com/Frege/frege-scripting</url>
   <modules>
@@ -16,7 +16,7 @@
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <frege.version>frege-3.21.232-g7b05453</frege.version>
+    <frege.version>3.21.297-g6b54457</frege.version>
     <frege.plugin.version>1.0.5</frege.plugin.version>
     <ecj.version>4.2.2</ecj.version>
   </properties>
@@ -38,7 +38,6 @@
       <dependency>
         <groupId>com.theoryinpractise.frege</groupId>
         <artifactId>frege-maven-plugin</artifactId>
-        <classifier>${frege.version}</classifier>
         <version>${frege.plugin.version}</version>
         <exclusions>
           <exclusion>
@@ -79,6 +78,11 @@
         <groupId>org.eclipse.jdt.core.compiler</groupId>
         <artifactId>ecj</artifactId>
         <version>${ecj.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>frege</groupId>
+        <artifactId>frege</artifactId>
+        <version>${frege.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

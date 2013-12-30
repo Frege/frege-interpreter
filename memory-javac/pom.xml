@@ -4,7 +4,7 @@
   <parent>
     <groupId>frege</groupId>
     <artifactId>frege-scripting</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2-SNAPSHOT</version>
   </parent>
   <artifactId>memory-javac</artifactId>
   <packaging>jar</packaging>
@@ -58,10 +58,9 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>com.theoryinpractise.frege</groupId>
-      <artifactId>frege-maven-plugin</artifactId>
-      <classifier>${frege.version}</classifier>
-      <version>${frege.plugin.version}</version>
+       <groupId>frege</groupId>
+        <artifactId>frege</artifactId>
+        <version>${frege.version}</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jdt.core.compiler</groupId>

@@ -6,10 +6,9 @@ module frege.interpreter.FregeScriptCompiler where
 import frege.Version
 import frege.compiler.Scanner hiding (main, is)
 import frege.compiler.Main(stdOptions, format, 
-  make, lexPass, parsePass, postTrue, getOperators)
-import frege.compiler.GUtil
-import frege.compiler.BaseTypes(Pos)
-import frege.lib.PP
+  make, parsePass, postTrue, getOperators)
+import frege.compiler.GUtil as GUtil()
+import frege.lib.PP(TEXT)
 import Data.List
 import Data.Maybe
 import Java.IO()
@@ -33,10 +32,10 @@ import frege.compiler.gen.Util    as GU()
 import frege.compiler.GenJava7    as G7()
 import frege.compiler.EclipseUtil as EU()
 import frege.java.Net
-import frege.java.Lang (ClassLoader)
 
 --- utility function to create 'Options' data structure
-createopts sp flags dir path prefix = stdOptions.{
+createopts sp flags dir path prefix source = stdOptions.{
+                                source = source,
                                 sourcePath = sp,
                                 flags, dir,
                                 path = path,
@@ -93,10 +92,10 @@ standardOptions exld = do
         }
         
 --- utility function to run the compiler, callable from Java
-runfregec !src !predefs !opts !pw loader steps moduleName modulePrelude = do
+runfregec !src !predefs !opts !pw loader steps moduleName = do
         global <- standardOptions loader
         let g0 = global.{options = opts}.{sub <- SubSt.{stderr=pw}}
-        return $ StG.run (run predefs steps moduleName modulePrelude) g0.{options <- Options.{source=src}}
+        return $ StG.run (run src predefs steps moduleName) g0
 
 data SourceInfo = Module | Definitions | Expression {variableName :: String}
 
@@ -104,21 +103,20 @@ derive Show SourceInfo
 
 {-returns true if the script is a list of definitions, false if the script
   is an expression or a module-}        
-findScriptType :: String -> StG SourceInfo   
-findScriptType predefs = do
+findScriptType :: String -> String -> StG SourceInfo
+findScriptType src predefs = do
+  runpass (lexPass src,         "lexical analysis                      ", postTrue)
   g <- getST
-  runpass (lexPass,         "lexical analysis                      ", postTrue)
-  g <- getST
-  if g.errors == 0 then scriptTypePass predefs else return SourceInfo.Module
+  if g.errors == 0 then scriptTypePass src predefs else return SourceInfo.Module
   
-scriptTypePass predefs = do
+scriptTypePass src predefs = do
   g <- getST
   let tokens = (filter noComment g.sub.toks.toList)
   case tokens of
     [] -> return SourceInfo.Module 
     (Token{tokid=PACKAGE}) : _ -> return SourceInfo.Module 
     _ -> do
-      isExpr <- isExpressionPass predefs
+      isExpr <- isExpressionPass src predefs
       return (if isExpr 
         then SourceInfo.Expression $ findUnusedVariableName predefs
         else SourceInfo.Definitions)
@@ -126,9 +124,15 @@ scriptTypePass predefs = do
 noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
         
 --- utility function to run the compiler, combines 'createopts' and 'runfregec'
-runcompiler src predefs sp flags dir path prefix pw loader steps moduleName modulePrelude = 
-  runfregec src predefs opts pw loader steps moduleName modulePrelude
-    where opts = createopts sp flags dir path prefix
+runcompiler src predefs sp flags dir path prefix pw loader steps moduleName =
+  runfregec src predefs opts pw loader steps moduleName
+    where opts = createopts sp flags dir path prefix source
+          source = fileName moduleName
+          fileName s = (packed $ fileName' s.toList) ++ ".fr"
+          fileName' cs = let (fst, snd) = break (== '.') cs in
+                case snd of
+                  []     -> fst
+                  (x:xs) -> fileName' xs
     
 runpass (pass,description,post) = do
     state <- getST
@@ -145,28 +149,26 @@ runpass (pass,description,post) = do
  * 'run' all passes, one after another
  * until one of them returns an error
  -}
-run predefs steps moduleName modulePrelude = do
+run src predefs steps moduleName = do
     g <- getST
-    scriptType <- findScriptType predefs
-    let source = buildScript g.options.source scriptType predefs moduleName modulePrelude
+    scriptType <- findScriptType src predefs
+    let source = buildScript src scriptType predefs moduleName
     changeST $ const g
-    changeST Global.{options <- Options.{source=source}}
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
-    --changeST Global.{sub <- SubSt.{loader}}
-    foreach steps runpass
+    foreach (steps source) runpass
     g <- getST
     return scriptType
 
 newLine = maybe "\n" id $ System.getProperty "line.separator" 
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
-variableDeclScript varName script = varName ++ " = " ++ script
+variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
 
-buildScript script SourceInfo.Definitions predefs moduleName _ = 
+buildScript script SourceInfo.Definitions predefs moduleName =
   intercalate newLine [moduleDeclScript moduleName, predefs, script]
-buildScript script SourceInfo.Expression{variableName=varName} predefs moduleName _ = 
+buildScript script SourceInfo.Expression{variableName=varName} predefs moduleName =
   intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
-buildScript script SourceInfo.Module predefs _ modulePrelude = script ++ newLine ++ modulePrelude
+buildScript script SourceInfo.Module predefs _ = script
 
 findUnusedVariableName script = "res" ++ show unusedVarNum where
   unusedVarNum = unJust $ find (not . flip elem used) [1..]
@@ -190,10 +192,10 @@ openPrinter pw = do
     *Note*: It is important that the typecheck pass has a description that starts with "type check".
     This way the IDE recognizes the last pass if it is not a build.
 -}
-passes jw packageName javac = [
+passes jw packageName javac f src = [
     -- function       description                            post condition
-    (lexPass,         "lexical analysis                      ", postTrue),
-    (iparsePass,      "syntax  analysis                      ", 
+    (lexPass src,         "lexical analysis                      ", postTrue),
+    (iparsePass f,      "syntax  analysis                      ",
        postTrue),
     (P1.pass,         "collecting definitions                ", P1.post),
     (P2.pass,         "symbol table initialization and import", P2.post),
@@ -247,7 +249,6 @@ javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
 javacPass compiler src = do
   g <- getST
   let !packName = g.sub.thisPack.unpack g
-      !loader = g.sub.loader
   !jsrc <- doio $ src.toString
   res <- doio $ compiler.compile jsrc packName
   isSuccess <- doio $ res.isSuccess
@@ -261,13 +262,12 @@ javacPass compiler src = do
   
     
 compile :: String -> [String] -> [String] -> PrintWriter -> 
-  StringWriter -> MutableIO MemoryJavaCompiler -> String -> String  -> String -> IO (SourceInfo, Global)
-compile src paths libpaths !ow !jw !compiler !predefs !moduleName !modulePrelude = do
-  --println $ "compiling:\n" ++ src
+  StringWriter -> MutableIO MemoryJavaCompiler -> String -> String  -> ([DefinitionT] -> [DefinitionT]) -> IO (SourceInfo, Global)
+compile src paths libpaths !ow !jw !compiler !predefs !moduleName f = do
   let flags = Flags.fromList [IDE]
-  let steps = passes jw moduleName compiler
+  let steps = passes jw moduleName compiler f
   loader <- compiler.classLoader
-  runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName modulePrelude
+  runcompiler src predefs paths flags "." libpaths "" ow loader steps moduleName
   
 isDefined :: [DefinitionT] -> Definition -> Bool
 isDefined defs (_@TypDcl{name=x}) = isJust . find (matching x) $ defs
@@ -312,6 +312,9 @@ exprType g compilationId = let symbols = getSymbols g.thisTab in
 lookupVarSymbol :: Symtab -> String -> Maybe Symbol    
 lookupVarSymbol symtab name = find (existsVarSymbol name) $ getSymbols symtab
 
+lookupSymbol :: Symtab -> String -> Maybe Symbol
+lookupSymbol symtab name = find (\sym -> sym.name.base == name) $ getSymbols symtab
+
 getSymbolType :: Symbol -> Global -> String
 getSymbolType SymI{typ} !g = EU.verbose g typ
 getSymbolType SymV{typ} !g = EU.verbose g typ
@@ -341,33 +344,34 @@ getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
             | otherwise                          = true
 
 
-iparsePass = do
+iparsePass f = do
     g       <- getST
     let tokens = (filter noComment g.sub.toks.toList)
     result <- Parse.pass tokens
     case result of
-        Just (Program.Module (packname, defs, doc)) -> do
+        Just (GUtil.Program.Module (packname, defs, doc)) -> do
             changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
             let ds = nubFront defs isDefined
                 gds = groupFunDcl ds
                 uniqds = concat $ nubFront gds isFunDefined
-            changeST Global.{sub <- (SubSt.{definitions = uniqds}
+            changeST Global.{sub <- (SubSt.{definitions = f uniqds}
                                      • SubSt.{packageDoc = Nothing})}
             stio ("tokens",  g.sub.toks.length)
         Just _ -> error "FATAL: Expected module"
         Nothing -> stio ("tokens", g.sub.toks.length)
         
+indent n src = (unlines . map (spaces ++) . lines $ src) where
+  spaces = concat $ replicate n " "
 
-isExpressionPass :: String -> StG Bool
-isExpressionPass predefs = do
+isExpressionPass :: String -> String -> StG Bool
+isExpressionPass src predefs = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    let decl src = variableDeclScript "f" ("(" ++ src ++ ")") --A declaration with some name
-    let changeSource src = intercalate newLine ["module T where", predefs, decl src]
-    changeST Global.{sub <- SubSt.{stderr=pw}, 
-      options <- Options.{source <- changeSource}}
-    runpass (lexPass,         "lexical analysis                      ", postTrue)
+    let varDecl = variableDeclScript "f" src
+        modDecl = intercalate newLine ["module T where", predefs, varDecl]
+    changeST Global.{sub <- SubSt.{stderr=pw}}
+    runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
     g <- getST
     if g.errors != 0 then
       return false
@@ -377,15 +381,13 @@ isExpressionPass predefs = do
       g <- getST
       return $ g.errors == 0
 
-lexPass = do
+lexPass src = do
     changeST Global.{sub <- SubSt.{toks = Array.fromList []}
                             . SubSt.{definitions = []}
                             . SubSt.{packageDoc  = Nothing}
                             . SubSt.{thisPack    = Pack.new ""}}
     changeST Global.{locals = Tree.empty, typEnv = []}
-    g <- getST
-    let opts = g.options
-    tokens <- Lex.passCS (CharSeq.fromString opts.source) getOperators
+    tokens <- Lex.passCS (CharSeq.fromString src) getOperators
     stio ("tokens", length tokens)
  
 
@@ -393,10 +395,11 @@ nubFront [] _ = []
 nubFront (x:xs) f = if (f xs x) then nubFront xs f else x : nubFront xs f
   
 isVariable :: Global -> Symbol -> Bool
-isVariable !g SymV{name,typ} = case typ.rho of
+isVariable g SymV{name,typ} = case typ.rho of
   RhoFun _ _ _ = false
-  RhoTau ctx _ = ctx == [] 
-isVariable !g SymL{alias} = maybe false (isVariable g) $ alias.findit g
+  RhoTau ctx _ = ctx == []
+isVariable g SymD{} = true
+isVariable g SymL{alias} = maybe false (isVariable g) $ alias.findit g
 isVariable _ _ = false
 
 isIO :: Global -> Symbol -> Bool
@@ -409,3 +412,37 @@ isIO _ _ = false
 isString g SymV{typ} = nice typ g == "StringJ Char"
 isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
+
+data ObjectArr = native "java.lang.Object[]" where
+    --- make a new mutable Object array
+    native new    "java.lang.Object[]"
+                                                :: Int -> STMutable s ObjectArr
+    native getAt  "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: Mutable s ObjectArr -> Int -> ST s (Maybe Object)
+    native setAt  "frege.runtime.Array.<java.lang.Object>arraySet"
+                                                :: Mutable s ObjectArr -> Int -> Object -> ST s ()
+    pure native frozenGetAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Maybe Object
+    --- use this only if it is absolutely sure that there are no nulls in the array
+    pure native elemAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Object
+    --- the length of the array
+    pure native length "frege.runtime.Array.<java.lang.Object>arrayLen"
+                                                :: ObjectArr -> Int
+    toList (a::ObjectArr) = elems a 0
+        where
+            elems (a::ObjectArr) i
+                | i < a.length = case frozenGetAt a i of
+                    Just s  -> s:elems a (i+1)
+                    Nothing -> elems a (i+1)
+                | otherwise = []
+
+    fromListST :: [Object] -> STMutable u ObjectArr
+    fromListST objects = (ObjectArr.new objects.length >>= loop 0 objects) where
+        loop j (x:xs) arr = do ObjectArr.setAt arr j x; loop (j+1) xs arr
+        loop j []     arr = return arr
+    fromList objects = ST.run (fromListST objects >>= readonly id)
+
+data Method = pure native java.lang.reflect.Method where
+  pure native getName :: Method -> String
+
