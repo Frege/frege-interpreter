@@ -58,14 +58,10 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>com.theoryinpractise.frege</groupId>
-      <artifactId>frege-maven-plugin</artifactId>
+       <groupId>frege</groupId>
+        <artifactId>frege</artifactId>
+        <version>${frege.version}</version>
     </dependency>
-      <dependency>
-          <groupId>frege</groupId>
-          <artifactId>frege</artifactId>
-          <version>${frege.version}</version>
-      </dependency>
     <dependency>
       <groupId>org.eclipse.jdt.core.compiler</groupId>
       <artifactId>ecj</artifactId>
