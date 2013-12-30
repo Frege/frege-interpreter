@@ -162,7 +162,7 @@ run src predefs steps moduleName = do
 newLine = maybe "\n" id $ System.getProperty "line.separator" 
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
-variableDeclScript varName script = varName ++ " = " ++ script
+variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
 
 buildScript script SourceInfo.Definitions predefs moduleName =
   intercalate newLine [moduleDeclScript moduleName, predefs, script]
@@ -312,6 +312,9 @@ exprType g compilationId = let symbols = getSymbols g.thisTab in
 lookupVarSymbol :: Symtab -> String -> Maybe Symbol    
 lookupVarSymbol symtab name = find (existsVarSymbol name) $ getSymbols symtab
 
+lookupSymbol :: Symtab -> String -> Maybe Symbol
+lookupSymbol symtab name = find (\sym -> sym.name.base == name) $ getSymbols symtab
+
 getSymbolType :: Symbol -> Global -> String
 getSymbolType SymI{typ} !g = EU.verbose g typ
 getSymbolType SymV{typ} !g = EU.verbose g typ
@@ -357,16 +360,18 @@ iparsePass f = do
         Just _ -> error "FATAL: Expected module"
         Nothing -> stio ("tokens", g.sub.toks.length)
         
+indent n src = (unlines . map (spaces ++) . lines $ src) where
+  spaces = concat $ replicate n " "
 
 isExpressionPass :: String -> String -> StG Bool
 isExpressionPass src predefs = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    let decl src = variableDeclScript "f" ("(" ++ src ++ ")") --A declaration with some name
-        changeSource src = intercalate newLine ["module T where", predefs, decl src]
+    let varDecl = variableDeclScript "f" src
+        modDecl = intercalate newLine ["module T where", predefs, varDecl]
     changeST Global.{sub <- SubSt.{stderr=pw}}
-    runpass (lexPass (changeSource src),         "lexical analysis                      ", postTrue)
+    runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
     g <- getST
     if g.errors != 0 then
       return false
@@ -407,3 +412,37 @@ isIO _ _ = false
 isString g SymV{typ} = nice typ g == "StringJ Char"
 isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
+
+data ObjectArr = native "java.lang.Object[]" where
+    --- make a new mutable Object array
+    native new    "java.lang.Object[]"
+                                                :: Int -> STMutable s ObjectArr
+    native getAt  "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: Mutable s ObjectArr -> Int -> ST s (Maybe Object)
+    native setAt  "frege.runtime.Array.<java.lang.Object>arraySet"
+                                                :: Mutable s ObjectArr -> Int -> Object -> ST s ()
+    pure native frozenGetAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Maybe Object
+    --- use this only if it is absolutely sure that there are no nulls in the array
+    pure native elemAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Object
+    --- the length of the array
+    pure native length "frege.runtime.Array.<java.lang.Object>arrayLen"
+                                                :: ObjectArr -> Int
+    toList (a::ObjectArr) = elems a 0
+        where
+            elems (a::ObjectArr) i
+                | i < a.length = case frozenGetAt a i of
+                    Just s  -> s:elems a (i+1)
+                    Nothing -> elems a (i+1)
+                | otherwise = []
+
+    fromListST :: [Object] -> STMutable u ObjectArr
+    fromListST objects = (ObjectArr.new objects.length >>= loop 0 objects) where
+        loop j (x:xs) arr = do ObjectArr.setAt arr j x; loop (j+1) xs arr
+        loop j []     arr = return arr
+    fromList objects = ST.run (fromListST objects >>= readonly id)
+
+data Method = pure native java.lang.reflect.Method where
+  pure native getName :: Method -> String
+
