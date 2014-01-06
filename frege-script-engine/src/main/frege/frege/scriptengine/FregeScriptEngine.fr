@@ -5,44 +5,40 @@ import frege.interpreter.FregeScriptCompiler
 import frege.interpreter.FregeInterpreter
 import frege.java.Net
 
-data ScriptContext = mutable native javax.script.ScriptContext where
-    native getAttribute :: ScriptContext -> String -> Int -> IO (Maybe Object)
-    native setAttribute :: ScriptContext -> String -> Object -> Int -> IO ()
+data ScriptContext = native javax.script.ScriptContext where
+    native getAttribute :: Mutable s ScriptContext -> String -> Int -> ST s (Maybe Object)
+    native setAttribute :: Mutable s ScriptContext -> String -> Object -> Int -> ST s ()
     pure native engineScope javax.script.ScriptContext.ENGINE_SCOPE :: Int
     pure native globalScope javax.script.ScriptContext.GLOBAL_SCOPE :: Int
-    native getBindings :: ScriptContext -> Int -> IO Bindings
+    native getBindings :: Mutable s ScriptContext -> Int -> STMutable s  Bindings
     
 data SimpleScriptContext = mutable native javax.script.SimpleScriptContext where
   native new :: () -> IO SimpleScriptContext
     
-data Bindings = mutable native javax.script.Bindings where
-    native asMap "(java.util.Map)" :: Bindings -> IOMutable (JMap String Object)
+data Bindings = native javax.script.Bindings where
+    native asMap "(java.util.Map)" :: Bindings -> STMutable s (JMap String Object)
 
-initInterpreterState :: ScriptContext -> IO InterpreterState 
+initInterpreterState :: Mutable s ScriptContext -> ST s CompilationOpts
 initInterpreterState session = do
-  urlarr <- URLArray.new 0
-  loader <- ClassLoader.current >>= URLClassLoader.new urlarr
-  classesMaybe <- session.getAttribute "classes" ScriptContext.engineScope
-  classes <- maybe (HashMap.new () :: IOMutable (JMap String ByteArr)) asClassesMap classesMaybe
+  loaderMaybe <- session.getAttribute "classloader" ScriptContext.engineScope
+  loader <- maybe (MemoryClassLoader.new ()) (return asMemoryClassLoader) loaderMaybe
   strMaybe <- session.getAttribute "script" ScriptContext.engineScope
   currentScript <-  maybe (return "") asString strMaybe
-  let interpreterState = InterpreterState {
-      loader = loader,
-      classes = classes,
-      moduleName = "script.Main",
-      currentScript = currentScript,
-      transformDefs = id
-  }
+  cl <- Mutable.freeze loader
+  return $ CompilationOpts {
+                              loader = cl,
+                              predefs = "",
+                              transformDefs = id
+                           }
   return interpreterState
 
-eval :: String -> ScriptContext -> IO ([String] | Maybe Object)
+eval :: String -> Mutable s ScriptContext -> ST s ([String] | Maybe a)
 eval script context = do
-    state <- initInterpreterState context
-    (res, state) <- runInterpreter (interpret script context) state
-    case res of
-        Left _ -> return res
-        Right _ -> do
-            putContext context "classes" state.classes ScriptContext.engineScope
+    opts <- initInterpreterState context
+    case compileWithOpts script opts of
+        Left g -> return $ showMessages res
+        Right (CompilationSuccess {classLoader=loader,sourceInfo=srcType,state=g})-> do
+            putContext context "classloader" loader ScriptContext.engineScope
             putContext context "script" state.currentScript ScriptContext.engineScope
             return res
             
@@ -135,7 +131,7 @@ putContext :: ScriptContext -> String -> a -> Int -> IO ()
 putContext context name value scope = 
     ScriptContext.setAttribute context name (asObject value) scope
 
-native asClassesMap "(java.util.Map)" :: Object -> IOMutable (JMap String ByteArr)
+native asMemoryClassLoader "(frege.memoryjavac.MemoryClassLoader)" :: a -> MemoryClassLoader
 native asString "(java.lang.String)" :: Object -> IO String
 native asURLClassLoader "(java.net.URLClassLoader)" :: Object -> IO URLClassLoader
 native asBindingsMap "(java.util.Map)" :: Object -> STMutable s (JMap String Object)

@@ -3,139 +3,571 @@
 -}
 module frege.interpreter.FregeInterpreter where
 
-import frege.interpreter.FregeScriptCompiler
-import frege.compiler.Data
+
+import Compiler.Scanner hiding (main, is)
+import Compiler.Main(stdOptions, format,
+  make, parsePass, postTrue, getOperators)
+import Compiler.GUtil as GUtil()
+import Lib.PP(TEXT)
 import Data.List
-import frege.Version
-import frege.java.Net 
+import Data.Maybe
+import Java.IO()
+import Data.TreeMap (Tree, values)
+import Compiler.Nice (text, msgdoc)
+import Compiler.Classtools  as CT(FregePackage)
+import Compiler.Data
+import Compiler.Utilities   as U()
+import Compiler.Scanner     as Lex()
+import Compiler.Grammar     as Parse()
+import Compiler.Fixdefs     as P1()
+import Compiler.Import      as P2()
+import Compiler.Enter       as P3()
+import Compiler.TAlias      as P4()
+import Compiler.Transdef    as P5()
+import Compiler.Classes     as P6()
+import Compiler.Transform   as P7()
+import Compiler.Typecheck   as TC()
+import Compiler.GenMeta     as GM()
+import Compiler.gen.Util    as GU()
+import Compiler.GenJava7    as G7()
+import Compiler.EclipseUtil as EU()
+import Compiler.DocUtils as DU(docit, docSym, DL, Doc, emitHtml)
+import Compiler.Import(getFP, importClass)
+import Java.Net
+import Data.Map as M()
 
+--- utility function to create 'Options' data structure
+createopts sp flags dir path prefix source = stdOptions.{
+                                source = source,
+                                sourcePath = sp,
+                                flags, dir,
+                                path = path,
+                                prefix}
 
-type Script = String
+standardOptions exld = do
+    cache <- Ref.new Tree.empty -- start out with empty cache
+    urlArr <- URLArray.new 0
+    loader <- URLClassLoader.new urlArr exld
+    return Global {
+            options = stdOptions,
+            sub = Sub {
+                cache, loader,
+                optab = Tree.empty,
+                toks = Array.fromList [],
+                idKind = Tree.empty,
+                definitions = [],
+                packageDoc = Nothing,
+                thisPos  = Position.null,
+                nsPos = Tree.empty,
+                thisPack = Pack.new "",
+                errors  = 0,
+                messages = [],
+                cancelled = return false,
+                nextPass = 1,
+                stderr = IO.stderr,
+                toExport = []
+            },
+            gen = Gen {
+                printer = IO.stdout,
+                tunique = 0,
+                runique = 0,
+                sunique = 0,
+                xunique = 1,
+                kunique = 1,
+                tTree = Tree.empty,
+                rTree = Tree.empty,
+                sTree = Tree.empty,
+                xTree = Tree.empty .insert GU.defEA 0,        -- so that 0 never indexes valid expression
+                kTree = Tree.empty .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
+                consts = Tree.empty,
+                lambdas = Tree.empty,
+                syminfo = Tree.empty,
+                jimport = Tree.empty,
+            },
+            unique = 1,
+            packages = Tree.empty,
+            namespaces = Tree.empty,
+            genEnv = [],
+            javaEnv = Tree.empty,
+            locals = Tree.empty,
+            typEnv = [],
+            tySubst = Tree.empty
+        }
 
-data InterpreterState = InterpreterState {
-  loader :: URLClassLoader,
-  classes :: MutableIO (JMap String ByteArr), --a Java Map for interop to call javac in native code
-  moduleName :: String,
-  currentScript :: String,
+data SourceInfo = Module | Definitions | Expression {variableName :: String}
+
+derive Show SourceInfo
+
+{-returns true if the script is a list of definitions, false if the script
+  is an expression or a module-}
+findScriptType :: String -> String -> StG SourceInfo
+findScriptType src predefs = do
+  runpass (lexPass src,         "lexical analysis                      ", postTrue)
+  g <- getST
+  if g.errors == 0 then scriptTypePass src predefs else return SourceInfo.Module
+
+scriptTypePass src predefs = do
+  g <- getST
+  let tokens = filter noComment g.sub.toks.toList
+  case tokens of
+    [] -> return SourceInfo.Module
+    (Token{tokid=PACKAGE}) : _ -> return SourceInfo.Module
+    _ -> do
+      isExpr <- isExpressionPass src predefs
+      if isExpr then return $ SourceInfo.Expression $ findUnusedVariableName predefs
+      else return SourceInfo.Definitions
+
+noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
+
+data CompilationResult = CompilationSuccess {
+                                              javaSource :: String,
+                                              sourceInfo :: SourceInfo,
+                                              classLoader :: MemoryClassLoader,
+                                              state :: Global --Compilation state
+                                            }
+                         | CompilationFailure Global
+data Environment = Environment {
+  loader :: MemoryClassLoader,
+  predefs :: [String],
   transformDefs :: [DefinitionT] -> [DefinitionT]
-} 
+} where
+  private defaultST = do
+                loader <- MemoryClassLoader.new ()
+                cl <- Mutable.freeze loader
+                return $ Environment {
+                                            loader = cl,
+                                            predefs = [],
+                                            transformDefs = id
+                                         }
+  default = ST.run defaultST
 
-data CompilationInfo = CompilationInfo {
-  javaSource :: String, 
-  sourceInfo :: SourceInfo, 
-  state :: Global --Compilation state
-}
+compile :: String -> CompilationResult
+compile src = compileWithEnv src Environment.default
 
-data CompilationResult = CompilationSuccess CompilationInfo |
-                         CompilationFailure [String]
+compileWithEnv :: String -> Environment -> CompilationResult
+compileWithEnv src env = IO.performUnsafe $ do
+  outWriter <- StringWriter.new () >>= StringWriter.printer
+  javaSourceWriter <- StringWriter.new () -- Java source will be written here
+  classLoader <- Mutable.thaw env.loader
+  javac <- MemoryJavaCompiler.new classLoader
+  let predefs = concat $ intersperse newLine env.predefs
+      moduleName = "fregerepl.Console"
+      steps = passes javaSourceWriter moduleName javac env.transformDefs
+      flags = Flags.fromList [WARNINGS, HINTS, IDE]
+  (sourceType, global) <- runcompiler src predefs ["."] flags "." [] "" outWriter env.loader steps moduleName
+  if (Global.errors global == 0) then do
+    classLoader <- javac.classLoader >>= Mutable.freeze
+    javaSource <- javaSourceWriter.toString
+    return $ CompilationSuccess {
+                                   javaSource=javaSource,
+                                   sourceInfo=sourceType,
+                                   state=global,
+                                   classLoader=classLoader}
+  else return . CompilationFailure $ global
 
-compile :: Script -> Interpreter CompilationResult
-compile src = do
-  s <- Interpreter.get
-  outStringWriter <- liftIO $ StringWriter.new () -- A compiler output writer
-  outWriter <- liftIO $ outStringWriter.printer
-  javaSourceStringWriter <- liftIO $ StringWriter.new () -- Java source will be written here
-  javac <- liftIO $ MemoryJavaCompiler.new s.loader s.classes
-  (sourceInfo, compilerState) <- liftIO $ FregeScriptCompiler.compile src ["."] [] 
-    outWriter javaSourceStringWriter javac s.currentScript s.moduleName s.transformDefs
-  javaSource <- liftIO $ javaSourceStringWriter.toString
-  if (Global.errors compilerState == 0) then do --No compilation errors
-    javaSource <- liftIO $ javaSourceStringWriter.toString
-    newclasses <- liftIO $ javac.lastCompilation >>= JavaCompilationInfo.classes
-    Interpreter.put $ s.{classes=newclasses}
-    return . CompilationSuccess $ CompilationInfo{
-                                        javaSource=javaSource, 
-                                        sourceInfo=sourceInfo, 
-                                        state=compilerState}
-  else do --Compilation error. Accumulate the error messages along with their position.
-    msgToText m = show (Message.pos m) ++ ": " ++ m.text
-    let messages = intercalate newLine $ map msgToText compilerState.sub.messages
-    return $ CompilationFailure [messages]
+--- utility function to run the compiler, combines 'createopts' and 'runfregec'
+runcompiler src predefs sp flags dir path prefix pw loader steps moduleName =
+  runfregec src predefs opts pw loader steps moduleName
+    where opts = createopts sp flags dir path prefix source
+          source = fileName moduleName
+          fileName s = (packed $ fileName' s.toList) ++ ".fr"
+          fileName' cs = let (fst, snd) = break (== '.') cs in
+                case snd of
+                  []     -> fst
+                  (x:xs) -> fileName' xs
 
-typeOfExpression :: String -> Interpreter (Either [String] String)
-typeOfExpression script = do
-  fregecRes <- compile script
-  case fregecRes of
-    -- The script is a set of definitions
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Definitions,state=state}) ->
-      return $ Left ["Not an expression!"]
-    -- The script is a module
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,sourceInfo=Module,state=state}) ->
-       return $ Left ["Not an expression!"]
-    -- The script is an expression 
-    CompilationSuccess (c@CompilationInfo{javaSource=jsrc,
-                             sourceInfo=Expression{variableName=var},
-                             state=g}) -> 
-        return $ maybe (Left ["Invalid expression!"]) (\s -> Right $ getSymbolType s g) $ lookupVarSymbol g.thisTab var
-    CompilationFailure err -> return $ Left err
-      
+--- utility function to run the compiler, callable from Java
+runfregec !src !predefs !opts !pw loader steps moduleName = do
+        global <- standardOptions loader
+        let g0 = global.{options = opts}.{sub <- SubSt.{stderr=pw}}
+        return $ StG.run (run src predefs steps moduleName) g0
+
+{--
+ * 'run' all passes, one after another
+ * until one of them returns an error
+ -}
+run src predefs steps moduleName = do
+    g <- getST
+    scriptType <- findScriptType src predefs
+    let source = buildScript src scriptType predefs moduleName
+    changeST $ const g
+    changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
+    foreach (steps source) runpass
+    g <- getST
+    return scriptType
+
+extractGlobal loader = IO.performUnsafe $ standardOptions loader
+
+runpass (pass,description,post) = do
+    state <- getST
+    when (state.errors == 0) do
+        (itemnm, items) <- pass
+        state <- getST
+        postconditionHolds <- if state.errors == 0 then post else stio true
+        unless (postconditionHolds) do
+            doio (state.stderr.println "FATAL: post condition violated")
+            changeST Global.{sub <- SubSt.{errors <- (1+)}}
+        stio ()
+
+derive Show Severity
+
+showMessages :: Global -> [String]
+showMessages compilerState = map msgToText compilerState.sub.messages where
+  msgToText m = "[" ++ show m.level ++ "] " ++ show (Message.pos m) ++ ": " ++ m.text
+
+outlineModule pack g = fst $ State.run (outlineModule' pack)  g where
+    outlineModule' pack = do
+        let p = Pack.new pack
+        importClass Position.null p
+        g <- getST
+        case g.packages.lookup p of
+            Nothing -> return []
+            Just env -> return $ map (EU.label g) $ EU.symbols env
+
+newLine = maybe "\n" id $ System.getProperty "line.separator"
+
+className global = show $ sub.thisPack.className global where sub = Global.sub global
+
+pure native longToString Long.toString :: Long -> Int -> String
+
+moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
+variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
+
+buildScript script SourceInfo.Definitions predefs moduleName =
+  intercalate newLine [moduleDeclScript moduleName, predefs, script]
+buildScript script SourceInfo.Expression{variableName=varName} predefs moduleName =
+  intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
+buildScript script SourceInfo.Module predefs _ = script
+
+findUnusedVariableName script = "res" ++ show unusedVarNum where
+  unusedVarNum = unJust $ find (not . flip elem used) [1..]
+  used = reverse $ loop m []
+  m = #res(\d+)#.matcher script
+  loop :: Matcher -> [Int] -> [Int]
+  loop m1 acc | Just m2 <- m1.find = loop m2 ((atoi . unJust $ m2.group 1) : acc)
+              | otherwise = acc
+
+symDoc sym global = fst $ StG.run (symbolDocumentationST sym) global
+packageDoc pack global = fst $ StG.run (packDocumentationST pack) global
+helpDoc src global = fst $ StG.run (helpDocST src) global
+
+symbolDocumentationST :: Symbol -> StG String
+symbolDocumentationST sym = do
+    sw <-  doio $  StringWriter.new ()
+    p  <-  doio $  StringWriter.printer sw
+    changeST Global.{gen <- GenSt.{printer=p}}
+    g <- getST
+    let ds = docSym g sym
+        dl = DL (Just "func") [ds]
+        doc = Doc [dl]
+    emitHtml false doc      -- html without CSS, swing does not understand
+    doio $ g.printer.close
+    result <- doio $ sw.toString
+    return result
+
+packDocumentationST :: String -> StG (Maybe String)
+packDocumentationST pack = do
+    g <- getST
+    r <- getFP pack
+    case r of
+        Right (Just fp) -> case fp.doc of
+            ""   -> return . Just $ ("Undocumented package " ++ pack)
+            text -> do
+                let doc = Doc $ docit g (Just text)
+                sw <-  doio $  StringWriter.new ()
+                p  <-  doio $  StringWriter.printer sw
+                changeST Global.{gen <- GenSt.{printer=p}}
+                emitHtml false doc      -- html without CSS, swing does not understand
+                doio $ g.printer.close
+                result <- doio $ sw.toString
+                return . Just $ result
+        Left ex -> return Nothing
+        sonst   -> return . Just $ ("(java class?) " ++ pack)
+
+sNameToQName sName = do
+  g <- getST
+  qNames <- U.resolve (VName g.thisPack) Position.null sName
+  return (listToMaybe qNames)  -- Just taking first resolved
+
+helpDocST :: String -> StG (Maybe String)
+helpDocST source = do
+  global <- getST
+  qNameMay <- sNameToQName (createSName source)
+  let symMay = qNameMay >>= (\qname -> qname.findit global)
+  maybe (return Nothing) (\sym -> symbolDocumentationST sym >>= return . Just) symMay
+
+createSName s
+  | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(\p{Lu}.*)$# = with2con ns ty id
+  | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(.*)$#       = with2var ns ty id
+  | Just (Just ty : Just id : _)           <- s `match` #^(.*)\.(\p{Lu}.*)$#       = with1con ty id
+  | Just (Just ty : Just id : _)           <- s `match` #^(.*)\.(.*)$#             = with1var ty id
+  | s ~ #^\p{Lu}.*$#                                                               = Simple (Token CONID s 1 0 0 [])
+  | otherwise                                                                      = Simple (Token VARID s 1 0 0 [])
+     where with2con ns ty id = With2 (qual ns) (qual ty) (con id)
+           with2var ns ty id = With2 (qual ns) (qual ty) (var id)
+           with1con ty id = With1 (qual ty) (con id)
+           with1var ty id = With1 (qual ty) (var id)
+           qual name = Token QUALIFIER name 1 0 0 []
+           con name = Token CONID name 1 0 0 []
+           var name = Token VARID name 1 0 0 []
+
+match s regex = groups <$> s =~ regex where groups m = [m.group i | i <- [1..groupCount m]]
+
+pure native groupCount :: Matcher -> Int
+
 {--
  * [returns] the show script for the passed symbol. If the symbol is of type IO,
  *           it is "executed" and then @show@ is applied.
  * [requires] the script must represent an expression
--}    
-buildShowScript varName state symbol = 
-  if isIO state symbol then "show $ IO.performUnsafe " ++ varName
-  else "show $ " ++ varName
-  
+-}
+buildShowScript varName state symbol
+  | isIO state symbol = "show $ IO.performUnsafe " ++ varName
+  | otherwise         = "show $ " ++ varName
+
 native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
    ScriptException
 
-pure native toLowerCase :: String -> String
-pure native trim :: String -> String
-    
-data StateT s m a = StateT { runStateT :: (s -> m (a,s)) }
- 
-instance Monad (Monad m) => StateT s m where
-  return a         = StateT (\s -> return (a,s))
-  (StateT x) >>= f = StateT t where
-    t s = do
-      (v,s') <- x s          -- get new value and state
-      StateT.runStateT (f v) s'     -- pass them to f
-       
-       
-instance MonadPlus (MonadPlus m) => (StateT s m) where
-    mzero = StateT (\s -> mzero)
-    (StateT x1) `mplus` (StateT x2) = StateT (\s -> (x1 s) `mplus` (x2 s))
-                                                        
- 
-evalStateT m s = liftM fst (StateT.runStateT m s)
- 
-state :: Monad m
-      => (s -> (a, s))  -- ^pure state transformer
-      -> StateT s m a   -- ^equivalent state-passing computation
-state f = StateT (return . f)
- 
-class MonadTrans t where
-  -- | Lift a computation from the argument monad to the constructed monad.
-  lift :: Monad m => m a -> t m a
-   
-instance MonadTrans (StateT s) where
-    lift c = StateT (\s -> c >>= (\x -> return (x,s)))
-    
-class MonadIO (Monad m) => m where
-    -- | Lift a computation from the 'IO' monad.
-    liftIO :: IO a -> m a
+pure native fieldValue frege.memoryjavac.JavaUtils.fieldValue ::
+  String -> String -> MemoryClassLoader -> Maybe a
 
-data Interpreter a = Interpreter { 
-  unInterpreter :: StateT InterpreterState IO a } where
-  --MonadState functions
-  get = Interpreter (StateT (\s -> return (s,s)))
-  put s = Interpreter (StateT (\_ -> return ((), s)))
-  modify f = do
-      s <- Interpreter.get
-      Interpreter.put (f s)
- 
-instance Monad Interpreter where
-  return a = Interpreter $ return a
-  (Interpreter x) >>= f = Interpreter $ x >>= (\y -> Interpreter.unInterpreter $ f y)
-                         
-instance MonadIO Interpreter where
-    liftIO = Interpreter . lift
-    
-evalInterpreter interpreter state = 
-  evalStateT (Interpreter.unInterpreter interpreter) state
-  
-runInterpreter interpreter state = 
-    StateT.runStateT (Interpreter.unInterpreter interpreter) state
-  
+openPrinter pw = do
+    g <- getST
+    printer <- doio $ StringWriter.printer pw
+    changeST Global.{gen <- GenSt.{printer=printer}}
+    stio ("file", 1)
+
+{--
+    Description of the compiler passes.
+
+    This list is also used by the IDE to determine the compiler passes to run.
+
+    *Note*: It is important that the typecheck pass has a description that starts with "type check".
+    This way the IDE recognizes the last pass if it is not a build.
+-}
+passes jw packageName javac f src = [
+    -- function       description                            post condition
+    (lexPass src,         "lexical analysis                      ", postTrue),
+    (iparsePass f,      "syntax  analysis                      ",
+       postTrue),
+    (P1.pass,         "collecting definitions                ", P1.post),
+    (P2.pass,         "symbol table initialization and import", P2.post),
+    (P6.passI true,   "verify imported instances             ", P6.post),
+    (P3.pass,         "enter definitions                     ", P3.post),
+    (P4.pass,         "check type aliases                    ", P4.post),
+    (P3.pass2,        "make field definitions                ", P3.post),
+    (P3.pass3,        "enter (derived) instances             ", P3.post),
+    (P5.pass,         "translate names in exprs and types    ", P5.post),
+    (P6.passC,        "verify class definitions              ", P6.post),   -- TRACE6
+    (P6.passI false,  "verify own instances                  ", P6.post),   -- TRACE6
+    (P7.pass7,        "simplify lets                         ", P7.post),   -- TRACE7
+    (TC.pass,         "type check                            ", TC.post),   -- TRACET, TRACEO
+    (P7.pass9,        "simplify expressions                  ", P7.post),   -- TRACE9
+    (P7.pass8,        "globalize anonymous lambdas           ", P7.post),   -- TRACE8
+    (P7.pass10,       "strictness analysis                   ", P7.post),   -- TRACES
+    (openPrinter jw,     "open file                             ", postTrue),
+    (GM.pass,         "generate meta data                    ", GM.post),   -- none
+    (G7.pass,         "generate java code                    ", G7.post),  -- TRACEG
+    (javacPass javac jw,           "run java compiler                     ", postTrue)
+    ]
+
+data ScriptException = pure native javax.script.ScriptException
+derive Exceptional ScriptException
+
+data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
+  native new :: Mutable s (JMap String ByteArr) -> STMutable s MemoryJavaCompiler
+              | Mutable s MemoryClassLoader -> STMutable s MemoryJavaCompiler
+  native compile :: Mutable s MemoryJavaCompiler -> String -> String -> STMutable s JavaCompilationInfo
+  native classLoader :: Mutable s MemoryJavaCompiler ->  STMutable s MemoryClassLoader
+
+data MemoryClassLoader = native frege.memoryjavac.MemoryClassLoader where
+  native new :: () -> STMutable s MemoryClassLoader
+              | ClassLoader -> IOMutable MemoryClassLoader
+              | Mutable s (JMap String ByteArr) -> STMutable s MemoryClassLoader
+  pure native classes :: MemoryClassLoader -> JMap String ByteArr
+
+instance Cloneable MemoryClassLoader
+
+data JavaCompilationInfo = native frege.memoryjavac.CompilationInfo where
+  native isSuccess :: Mutable s JavaCompilationInfo -> ST s Bool
+  native errorsAsString :: Mutable s JavaCompilationInfo -> ST s String
+  native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
+  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArr)
+
+data ByteArr = mutable native "byte[]"
+
+data JMap k v = native java.util.Map where
+  native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
+  native get ::  Mutable s (JMap k v) -> k -> ST s (Maybe v)
+  native putAll ::  Mutable s (JMap k v) ->  Mutable s (JMap k v) -> ST s ()
+  native isEmpty :: Mutable s (JMap k v) -> ST s Bool
+
+data HashMap k v = native java.util.HashMap where
+  native new :: () -> STMutable s (HashMap k v)
+
+
+javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
+javacPass compiler src = do
+  g <- getST
+  let !packName = g.sub.thisPack.unpack g
+  !jsrc <- doio $ src.toString
+  res <- doio $ compiler.compile jsrc packName
+  isSuccess <- doio $ res.isSuccess
+  if !isSuccess
+    then do
+            msg <- doio $ res.errorsAsString
+            U.error Position.null (TEXT msg)
+            return ("javac", 1)
+    else
+      return ("javac", 0)
+
+matching (_@TypDcl{name=x}) (_@TypDcl{name=y}) = x == y
+matching (_@ClaDcl{name=x}) (_@ClaDcl{name=y}) = x == y
+matching (_@AnnDcl{name=x}) (_@AnnDcl{name=y}) = x == y
+matching (_@NatDcl{name=x}) (_@NatDcl{name=y}) = x == y
+matching (_@FunDcl{name=x,pats=[]}) (_@FunDcl{name=y,pats=[]}) = x == y
+matching (_@DatDcl{name=x}) (_@DatDcl{name=y}) = x == y
+matching (_@JavDcl{name=x}) (_@JavDcl{name=y}) = x == y
+matching _ _ = false
+
+funcMatching (_@FunDcl{name=x}) (_@FunDcl{name=y}) = x == y
+funcMatching _ _ = false
+
+exprType :: Global -> String -> String
+exprType g compilationId = let symbols = getSymbols g.thisTab in
+  case (find (existsVarSymbol compilationId) symbols) of
+    Just s -> EU.label g s
+    Nothing -> ""
+
+lookupVarSymbol :: Symtab -> String -> Maybe Symbol
+lookupVarSymbol symtab name = find (existsVarSymbol name) $ getSymbols symtab
+
+lookupSymbol :: Symtab -> String -> Maybe Symbol
+lookupSymbol symtab name = find (\sym -> sym.name.base == name) $ getSymbols symtab
+
+getSymbolType :: Symbol -> Global -> String
+getSymbolType SymI{typ} !g = EU.verbose g typ
+getSymbolType SymV{typ} !g = EU.verbose g typ
+getSymbolType SymD{typ} !g = EU.verbose g typ
+getSymbolType SymL{alias} !g = maybe "" (flip getSymbolType g) $ alias.findit g
+getSymbolType _ _ = ""
+
+showSymbols :: Global -> [String]
+showSymbols g  = map (EU.label g) $ getSymbols g.thisTab
+
+existsVarSymbol name SymV{name=x} = x.base == name
+existsVarSymbol name SymL{name=x} = x.base == name
+existsVarSymbol _ _ = false
+
+getSymbols :: Symtab -> [Symbol]
+getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
+    where
+        positionAndName a b = case Symbol.pos a <=> Symbol.pos b of
+                                    Eq -> comparing (QName.base • Symbol.name) a b
+                                    ne -> ne
+        wanted :: Symbol -> Bool
+        wanted sym
+            | sym.{alias?}                       = true
+            | Local{} <- sym.name                = true
+            -- sym.vis == Private                 = false
+            | sym.name.base ~ ´^(chg|upd|has|let|anon|lc)\$´ = false
+            | otherwise                          = true
+
+
+iparsePass f = do
+    g       <- getST
+    let tokens = (filter noComment g.sub.toks.toList)
+    result <- Parse.pass tokens
+    case result of
+        Just (GUtil.Program.Module (packname, defs, doc)) -> do
+            changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
+            let ds = nubBy matching defs
+                fm (x:xs) (y:ys) = funcMatching x y
+                fm _ _ = false
+                uniqds = concat $ nubBy fm $ groupBy funcMatching ds
+            changeST Global.{sub <- (SubSt.{definitions = f uniqds}
+                                     • SubSt.{packageDoc = Nothing})}
+            stio ("tokens",  g.sub.toks.length)
+        Just _ -> error "FATAL: Expected module"
+        Nothing -> stio ("tokens", g.sub.toks.length)
+
+indent n src = (unlines . map (spaces ++) . lines $ src) where
+  spaces = concat $ replicate n " "
+
+isExpressionPass :: String -> String -> StG Bool
+isExpressionPass src predefs = do
+    g       <- getST
+    sw <- doio $ StringWriter.new ()
+    pw <- doio $ sw.printer
+    let varDecl = variableDeclScript "f" src
+        modDecl = intercalate newLine ["module T where", predefs, varDecl]
+    changeST Global.{sub <- SubSt.{stderr=pw}}
+    runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
+    g <- getST
+    if g.errors != 0 then
+      return false
+    else do
+      let tokens = filter noComment g.sub.toks.toList
+      result <- Parse.pass tokens
+      g <- getST
+      return $ g.errors == 0
+
+lexPass src = do
+    changeST Global.{sub <- SubSt.{toks = Array.fromList []}
+                            . SubSt.{definitions = []}
+                            . SubSt.{packageDoc  = Nothing}
+                            . SubSt.{thisPack    = Pack.new ""}}
+    changeST Global.{locals = Tree.empty, typEnv = []}
+    tokens <- Lex.passCS (CharSeq.fromString src) getOperators
+    stio ("tokens", length tokens)
+
+isVariable :: Global -> Symbol -> Bool
+isVariable g SymV{name,typ} = case typ.rho of
+  RhoFun _ _ _ = false
+  RhoTau ctx _ = ctx == []
+isVariable g SymD{} = true
+isVariable g SymL{alias} = maybe false (isVariable g) $ alias.findit g
+isVariable _ _ = false
+
+isIO :: Global -> Symbol -> Bool
+isIO g SymV{typ} = "ST RealWorld" `isPrefix` nice typ g where
+                      isPrefix = isPrefixOf `on` toList
+                      f `on` g = \x \y -> f (g x) (g y)
+isIO g SymL{alias} = maybe false (isIO g) $ alias.findit g
+isIO _ _ = false
+
+isString g SymV{typ} = nice typ g == "StringJ Char"
+isString g SymL{alias} = maybe false (isString g) $ alias.findit g
+isString g _ = false
+
+data ObjectArr = native "java.lang.Object[]" where
+    --- make a new mutable Object array
+    native new    "java.lang.Object[]"
+                                                :: Int -> STMutable s ObjectArr
+    native getAt  "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: Mutable s ObjectArr -> Int -> ST s (Maybe Object)
+    native setAt  "frege.runtime.Array.<java.lang.Object>arraySet"
+                                                :: Mutable s ObjectArr -> Int -> Object -> ST s ()
+    pure native frozenGetAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Maybe Object
+    --- use this only if it is absolutely sure that there are no nulls in the array
+    pure native elemAt "frege.runtime.Array.<java.lang.Object>arrayGet"
+                                                :: ObjectArr -> Int -> Object
+    --- the length of the array
+    pure native length "frege.runtime.Array.<java.lang.Object>arrayLen"
+                                                :: ObjectArr -> Int
+    toList (a::ObjectArr) = elems a 0
+        where
+            elems (a::ObjectArr) i
+                | i < a.length = case frozenGetAt a i of
+                    Just s  -> s:elems a (i+1)
+                    Nothing -> elems a (i+1)
+                | otherwise = []
+
+    fromListST :: [Object] -> STMutable u ObjectArr
+    fromListST objects = (ObjectArr.new objects.length >>= loop 0 objects) where
+        loop j (x:xs) arr = do ObjectArr.setAt arr j x; loop (j+1) xs arr
+        loop j []     arr = return arr
+    fromList objects = ST.run (fromListST objects >>= readonly id)
+
+data Method = pure native java.lang.reflect.Method where
+  pure native getName :: Method -> String
