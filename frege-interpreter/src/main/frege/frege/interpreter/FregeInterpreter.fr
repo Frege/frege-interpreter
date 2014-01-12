@@ -46,12 +46,11 @@ createopts sp flags dir path prefix source = stdOptions.{
 
 standardOptions exld = do
     cache <- Ref.new Tree.empty -- start out with empty cache
-    urlArr <- URLArray.new 0
-    loader <- URLClassLoader.new urlArr exld
     return Global {
             options = stdOptions,
             sub = Sub {
-                cache, loader,
+                cache,
+                loader = exld,
                 optab = Tree.empty,
                 toks = Array.fromList [],
                 idKind = Tree.empty,
@@ -98,13 +97,13 @@ data SourceInfo = Module | Definitions | Expression {variableName :: String}
 
 derive Show SourceInfo
 
-{-returns true if the script is a list of definitions, false if the script
-  is an expression or a module-}
 findScriptType :: String -> String -> StG SourceInfo
 findScriptType src predefs = do
   runpass (lexPass src,         "lexical analysis                      ", postTrue)
   g <- getST
-  if g.errors == 0 then scriptTypePass src predefs else return SourceInfo.Module
+  if g.errors == 0
+    then scriptTypePass src predefs
+    else return SourceInfo.Module
 
 scriptTypePass src predefs = do
   g <- getST
@@ -114,18 +113,25 @@ scriptTypePass src predefs = do
     (Token{tokid=PACKAGE}) : _ -> return SourceInfo.Module
     _ -> do
       isExpr <- isExpressionPass src predefs
-      if isExpr then return $ SourceInfo.Expression $ findUnusedVariableName predefs
-      else return SourceInfo.Definitions
+      if isExpr
+        then return $ SourceInfo.Expression $ findUnusedVariableName predefs
+        else return SourceInfo.Definitions
 
 noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 
-data CompilationResult = CompilationSuccess {
-                                              javaSource :: String,
-                                              sourceInfo :: SourceInfo,
-                                              classLoader :: MemoryClassLoader,
-                                              state :: Global --Compilation state
-                                            }
-                         | CompilationFailure Global
+data JavagenResult = JavagenResult
+                     {
+                       javaSource :: String,
+                       classLoader :: MemoryClassLoader,
+                       state :: Global
+                     }
+
+data TypecheckResult = TypecheckResult
+                       {
+                         sourceInfo :: SourceInfo,
+                         state :: Global
+                       }
+
 data Environment = Environment {
   loader :: MemoryClassLoader,
   predefs :: [String],
@@ -141,29 +147,38 @@ data Environment = Environment {
                                          }
   default = ST.run defaultST
 
-compile :: String -> CompilationResult
-compile src = compileWithEnv src Environment.default
-
-compileWithEnv :: String -> Environment -> CompilationResult
-compileWithEnv src env = IO.performUnsafe $ do
+javagen :: Global -> Environment -> (Global | JavagenResult)
+javagen g env = IO.performUnsafe $ do
   outWriter <- StringWriter.new () >>= StringWriter.printer
   javaSourceWriter <- StringWriter.new () -- Java source will be written here
   classLoader <- Mutable.thaw env.loader
   javac <- MemoryJavaCompiler.new classLoader
-  let predefs = concat $ intersperse newLine env.predefs
-      moduleName = "fregerepl.Console"
-      steps = passes javaSourceWriter moduleName javac env.transformDefs
+  let steps = javagenPasses javaSourceWriter javac
+      global = snd $ StG.run (foreach steps runpass) g
+  if (Global.errors global == 0)
+    then do
+      classLoader <- javac.classLoader >>= Mutable.freeze
+      javaSource <- javaSourceWriter.toString
+      return . Right $ JavagenResult {
+                       javaSource=javaSource,
+                       state=global,
+                       classLoader=classLoader }
+    else return . Left $ global
+
+typecheck :: String -> Environment -> (Global | TypecheckResult)
+typecheck src env = IO.performUnsafe $ do
+  outWriter <- StringWriter.new () >>= StringWriter.printer
+  let predefs = concat . intersperse newLine $ reverse env.predefs
+      moduleName = "frege.repl.Console"
+      steps = typecheckPasses env.transformDefs
       flags = Flags.fromList [WARNINGS, HINTS, IDE]
   (sourceType, global) <- runcompiler src predefs ["."] flags "." [] "" outWriter env.loader steps moduleName
-  if (Global.errors global == 0) then do
-    classLoader <- javac.classLoader >>= Mutable.freeze
-    javaSource <- javaSourceWriter.toString
-    return $ CompilationSuccess {
-                                   javaSource=javaSource,
-                                   sourceInfo=sourceType,
-                                   state=global,
-                                   classLoader=classLoader}
-  else return . CompilationFailure $ global
+  if (Global.errors global == 0)
+    then return . Right $ TypecheckResult {
+                          sourceInfo=sourceType,
+                          state=global
+                         }
+    else return . Left $ global
 
 --- utility function to run the compiler, combines 'createopts' and 'runfregec'
 runcompiler src predefs sp flags dir path prefix pw loader steps moduleName =
@@ -215,7 +230,7 @@ showMessages :: Global -> [String]
 showMessages compilerState = map msgToText compilerState.sub.messages where
   msgToText m = "[" ++ show m.level ++ "] " ++ show (Message.pos m) ++ ": " ++ m.text
 
-outlineModule pack g = fst $ State.run (outlineModule' pack)  g where
+outlineModuleSymbols pack g = fst $ State.run (outlineModule' pack)  g where
     outlineModule' pack = do
         let p = Pack.new pack
         importClass Position.null p
@@ -224,11 +239,12 @@ outlineModule pack g = fst $ State.run (outlineModule' pack)  g where
             Nothing -> return []
             Just env -> return $ map (EU.label g) $ EU.symbols env
 
+outlineSymbols :: Global -> [String]
+outlineSymbols g = map (EU.label g) $ EU.symbols g.thisTab
+
 newLine = maybe "\n" id $ System.getProperty "line.separator"
 
 className global = show $ sub.thisPack.className global where sub = Global.sub global
-
-pure native longToString Long.toString :: Long -> Int -> String
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
@@ -313,22 +329,9 @@ createSName s
 
 match s regex = groups <$> s =~ regex where groups m = [m.group i | i <- [1..groupCount m]]
 
-pure native groupCount :: Matcher -> Int
-
-{--
- * [returns] the show script for the passed symbol. If the symbol is of type IO,
- *           it is "executed" and then @show@ is applied.
- * [requires] the script must represent an expression
--}
 buildShowScript varName state symbol
   | isIO state symbol = "show $ IO.performUnsafe " ++ varName
   | otherwise         = "show $ " ++ varName
-
-native invokeMain frege.memoryjavac.JavaUtils.invokeMain :: String -> ClassLoader -> IO () throws
-   ScriptException
-
-pure native fieldValue frege.memoryjavac.JavaUtils.fieldValue ::
-  String -> String -> MemoryClassLoader -> Maybe a
 
 openPrinter pw = do
     g <- getST
@@ -336,31 +339,8 @@ openPrinter pw = do
     changeST Global.{gen <- GenSt.{printer=printer}}
     stio ("file", 1)
 
-{--
-    Description of the compiler passes.
-
-    This list is also used by the IDE to determine the compiler passes to run.
-
-    *Note*: It is important that the typecheck pass has a description that starts with "type check".
-    This way the IDE recognizes the last pass if it is not a build.
--}
-passes jw packageName javac f src = [
+javagenPasses jw javac = [
     -- function       description                            post condition
-    (lexPass src,         "lexical analysis                      ", postTrue),
-    (iparsePass f,      "syntax  analysis                      ",
-       postTrue),
-    (P1.pass,         "collecting definitions                ", P1.post),
-    (P2.pass,         "symbol table initialization and import", P2.post),
-    (P6.passI true,   "verify imported instances             ", P6.post),
-    (P3.pass,         "enter definitions                     ", P3.post),
-    (P4.pass,         "check type aliases                    ", P4.post),
-    (P3.pass2,        "make field definitions                ", P3.post),
-    (P3.pass3,        "enter (derived) instances             ", P3.post),
-    (P5.pass,         "translate names in exprs and types    ", P5.post),
-    (P6.passC,        "verify class definitions              ", P6.post),   -- TRACE6
-    (P6.passI false,  "verify own instances                  ", P6.post),   -- TRACE6
-    (P7.pass7,        "simplify lets                         ", P7.post),   -- TRACE7
-    (TC.pass,         "type check                            ", TC.post),   -- TRACET, TRACEO
     (P7.pass9,        "simplify expressions                  ", P7.post),   -- TRACE9
     (P7.pass8,        "globalize anonymous lambdas           ", P7.post),   -- TRACE8
     (P7.pass10,       "strictness analysis                   ", P7.post),   -- TRACES
@@ -370,40 +350,23 @@ passes jw packageName javac f src = [
     (javacPass javac jw,           "run java compiler                     ", postTrue)
     ]
 
-data ScriptException = pure native javax.script.ScriptException
-derive Exceptional ScriptException
-
-data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
-  native new :: Mutable s (JMap String ByteArr) -> STMutable s MemoryJavaCompiler
-              | Mutable s MemoryClassLoader -> STMutable s MemoryJavaCompiler
-  native compile :: Mutable s MemoryJavaCompiler -> String -> String -> STMutable s JavaCompilationInfo
-  native classLoader :: Mutable s MemoryJavaCompiler ->  STMutable s MemoryClassLoader
-
-data MemoryClassLoader = native frege.memoryjavac.MemoryClassLoader where
-  native new :: () -> STMutable s MemoryClassLoader
-              | ClassLoader -> IOMutable MemoryClassLoader
-              | Mutable s (JMap String ByteArr) -> STMutable s MemoryClassLoader
-  pure native classes :: MemoryClassLoader -> JMap String ByteArr
-
-instance Cloneable MemoryClassLoader
-
-data JavaCompilationInfo = native frege.memoryjavac.CompilationInfo where
-  native isSuccess :: Mutable s JavaCompilationInfo -> ST s Bool
-  native errorsAsString :: Mutable s JavaCompilationInfo -> ST s String
-  native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
-  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArr)
-
-data ByteArr = mutable native "byte[]"
-
-data JMap k v = native java.util.Map where
-  native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
-  native get ::  Mutable s (JMap k v) -> k -> ST s (Maybe v)
-  native putAll ::  Mutable s (JMap k v) ->  Mutable s (JMap k v) -> ST s ()
-  native isEmpty :: Mutable s (JMap k v) -> ST s Bool
-
-data HashMap k v = native java.util.HashMap where
-  native new :: () -> STMutable s (HashMap k v)
-
+typecheckPasses f src = [
+  -- function       description                            post condition
+  (lexPass src,         "lexical analysis                      ", postTrue),
+  (iparsePass f,      "syntax  analysis                      ", postTrue),
+  (P1.pass,         "collecting definitions                ", P1.post),
+  (P2.pass,         "symbol table initialization and import", P2.post),
+  (P6.passI true,   "verify imported instances             ", P6.post),
+  (P3.pass,         "enter definitions                     ", P3.post),
+  (P4.pass,         "check type aliases                    ", P4.post),
+  (P3.pass2,        "make field definitions                ", P3.post),
+  (P3.pass3,        "enter (derived) instances             ", P3.post),
+  (P5.pass,         "translate names in exprs and types    ", P5.post),
+  (P6.passC,        "verify class definitions              ", P6.post),   -- TRACE6
+  (P6.passI false,  "verify own instances                  ", P6.post),   -- TRACE6
+  (P7.pass7,        "simplify lets                         ", P7.post),   -- TRACE7
+  (TC.pass,         "type check                            ", TC.post)   -- TRACET, TRACEO
+  ]
 
 javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
 javacPass compiler src = do
@@ -480,11 +443,11 @@ iparsePass f = do
     case result of
         Just (GUtil.Program.Module (packname, defs, doc)) -> do
             changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
-            let ds = nubBy matching defs
+            let ds = nubBy matching $ reverse defs
                 fm (x:xs) (y:ys) = funcMatching x y
                 fm _ _ = false
                 uniqds = concat $ nubBy fm $ groupBy funcMatching ds
-            changeST Global.{sub <- (SubSt.{definitions = f uniqds}
+            changeST Global.{sub <- (SubSt.{definitions = reverse $ f uniqds}
                                      • SubSt.{packageDoc = Nothing})}
             stio ("tokens",  g.sub.toks.length)
         Just _ -> error "FATAL: Expected module"
@@ -503,13 +466,13 @@ isExpressionPass src predefs = do
     changeST Global.{sub <- SubSt.{stderr=pw}}
     runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
     g <- getST
-    if g.errors != 0 then
-      return false
-    else do
-      let tokens = filter noComment g.sub.toks.toList
-      result <- Parse.pass tokens
-      g <- getST
-      return $ g.errors == 0
+    if g.errors != 0
+      then return false
+      else do
+        let tokens = filter noComment g.sub.toks.toList
+        result <- Parse.pass tokens
+        g <- getST
+        return $ g.errors == 0
 
 lexPass src = do
     changeST Global.{sub <- SubSt.{toks = Array.fromList []}
@@ -538,6 +501,53 @@ isIO _ _ = false
 isString g SymV{typ} = nice typ g == "StringJ Char"
 isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
+
+showThrowableCause t = maybe (showNative t) showNative $ throwableCause t
+
+-- Native Definitions
+
+data MemoryJavaCompiler = native frege.memoryjavac.MemoryJavaCompiler where
+  native new :: Mutable s (JMap String ByteArr) -> STMutable s MemoryJavaCompiler
+              | Mutable s MemoryClassLoader -> STMutable s MemoryJavaCompiler
+  native compile :: Mutable s MemoryJavaCompiler -> String -> String -> STMutable s JavaCompilationInfo
+  native classLoader :: Mutable s MemoryJavaCompiler ->  STMutable s MemoryClassLoader
+
+data MemoryClassLoader = native frege.memoryjavac.MemoryClassLoader where
+  native new :: () -> STMutable s MemoryClassLoader
+              | ClassLoader -> IOMutable MemoryClassLoader
+              | Mutable s (JMap String ByteArr) -> STMutable s MemoryClassLoader
+  pure native classes :: MemoryClassLoader -> JMap String ByteArr
+
+instance Cloneable MemoryClassLoader
+
+data JavaCompilationInfo = native frege.memoryjavac.CompilationInfo where
+  native isSuccess :: Mutable s JavaCompilationInfo -> ST s Bool
+  native errorsAsString :: Mutable s JavaCompilationInfo -> ST s String
+  native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
+  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArr)
+
+data ByteArr = mutable native "byte[]"
+
+data JMap k v = native java.util.Map where
+  native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
+  native get ::  Mutable s (JMap k v) -> k -> ST s (Maybe v)
+  native putAll ::  Mutable s (JMap k v) ->  Mutable s (JMap k v) -> ST s ()
+  native isEmpty :: Mutable s (JMap k v) -> ST s Bool
+
+data HashMap k v = native java.util.HashMap where
+  native new :: () -> STMutable s (HashMap k v)
+
+pure native groupCount :: Matcher -> Int
+
+native fieldValue frege.memoryjavac.JavaUtils.fieldValue ::
+  String -> String -> MemoryClassLoader -> ST s (Maybe a) throws Throwable
+
+
+pure native longToString Long.toString :: Long -> Int -> String
+
+pure native showNative toString :: a -> String
+pure native throwableCause getCause :: Throwable -> Maybe Throwable
+
 
 data ObjectArr = native "java.lang.Object[]" where
     --- make a new mutable Object array
