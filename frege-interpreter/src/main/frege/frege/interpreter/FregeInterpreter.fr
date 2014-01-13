@@ -4,7 +4,7 @@
 module frege.interpreter.FregeInterpreter where
 
 
-import Compiler.Scanner hiding (main, is)
+import Compiler.Scanner hiding (main, is, interpret)
 import Compiler.Main(stdOptions, format,
   make, parsePass, postTrue, getOperators)
 import Compiler.GUtil as GUtil()
@@ -15,7 +15,8 @@ import Java.IO()
 import Data.TreeMap (Tree, values)
 import Compiler.Nice (text, msgdoc)
 import Compiler.Classtools  as CT(FregePackage)
-import Compiler.Data
+import Compiler.Data hiding (Message, Severity)
+import Compiler.Data (Severity(), Message CompilerMessage)
 import Compiler.Utilities   as U()
 import Compiler.Scanner     as Lex()
 import Compiler.Grammar     as Parse()
@@ -226,10 +227,6 @@ runpass (pass,description,post) = do
 
 derive Show Severity
 
-showMessages :: Global -> [String]
-showMessages compilerState = map msgToText compilerState.sub.messages where
-  msgToText m = "[" ++ show m.level ++ "] " ++ show (Message.pos m) ++ ": " ++ m.text
-
 outlineModuleSymbols pack g = fst $ State.run (outlineModule' pack)  g where
     outlineModule' pack = do
         let p = Pack.new pack
@@ -312,6 +309,11 @@ helpDocST source = do
   let symMay = qNameMay >>= (\qname -> qname.findit global)
   maybe (return Nothing) (\sym -> symbolDocumentationST sym >>= return . Just) symMay
 
+resolveSymbol :: String -> StG (Maybe Symbol)
+resolveSymbol source = do
+                         global <- getST
+                         qNameMay <- sNameToQName (createSName source)
+                         return $ qNameMay >>= (\qname -> qname.findit global)
 createSName s
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(\p{Lu}.*)$# = with2con ns ty id
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(.*)$#       = with2var ns ty id
@@ -395,18 +397,6 @@ matching _ _ = false
 funcMatching (_@FunDcl{name=x}) (_@FunDcl{name=y}) = x == y
 funcMatching _ _ = false
 
-exprType :: Global -> String -> String
-exprType g compilationId = let symbols = getSymbols g.thisTab in
-  case (find (existsVarSymbol compilationId) symbols) of
-    Just s -> EU.label g s
-    Nothing -> ""
-
-lookupVarSymbol :: Symtab -> String -> Maybe Symbol
-lookupVarSymbol symtab name = find (existsVarSymbol name) $ getSymbols symtab
-
-lookupSymbol :: Symtab -> String -> Maybe Symbol
-lookupSymbol symtab name = find (\sym -> sym.name.base == name) $ getSymbols symtab
-
 getSymbolType :: Symbol -> Global -> String
 getSymbolType SymI{typ} !g = EU.verbose g typ
 getSymbolType SymV{typ} !g = EU.verbose g typ
@@ -416,10 +406,6 @@ getSymbolType _ _ = ""
 
 showSymbols :: Global -> [String]
 showSymbols g  = map (EU.label g) $ getSymbols g.thisTab
-
-existsVarSymbol name SymV{name=x} = x.base == name
-existsVarSymbol name SymL{name=x} = x.base == name
-existsVarSymbol _ _ = false
 
 getSymbols :: Symtab -> [Symbol]
 getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
@@ -503,6 +489,116 @@ isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
 
 showThrowableCause t = maybe (showNative t) showNative $ throwableCause t
+
+data ReplEnv = ReplEnv {
+    lastExternalScript :: Maybe String,
+    lastJavaSource :: Maybe String,
+    prompt :: String,
+    env :: Environment
+} where
+  default = ReplEnv {
+    lastExternalScript = Nothing,
+    lastJavaSource = Nothing,
+    prompt = "frege> ", --Default prompt
+    env = Environment.default
+ }
+
+
+data ReplResult = ReplResult {out :: ReplOut, env :: ReplEnv, messages :: [Message]}
+
+data ReplOut = EvalError
+             | EvalSuccess
+             | Def
+             | ModuleDef String
+             | EvalNoOutput
+             | Interpret String String
+
+--eval :: Command -> ReplEnv -> ReplResult
+interpret line state = case typecheck line state.env of
+        Right (TypecheckResult {sourceInfo=sourceInfo,state=g}) ->
+          let (javacInterpState, javacState) = javac g state
+              messages                       = Message.translateCompilerMessages $ g.sub.messages
+              fail                       = failure state javacInterpState
+          in case sourceInfo of
+            Module -> let success state = ReplResult (ModuleDef (className javacInterpState)) state messages
+                      in maybe fail success javacState
+            Definitions -> ReplResult EvalNoOutput state.{env <- Environment.{predefs <- ((:) line)}} messages
+            Expression{variableName=var} ->
+              maybe fail (\newState -> showVariable var line newState javacInterpState) javacState
+        Left compilerState -> failure state compilerState
+
+browseModule moduleName state = ReplResult res state msgs where
+  global = extractGlobal state.env.loader
+  (res, msgs) = (EvalSuccess, [Message INFO . intercalate newLine $ outlineModuleSymbols moduleName global])
+
+browse state
+ | [] <- state.env.predefs = ReplResult EvalNoOutput state []
+ | otherwise = either (failure state) showSymbols $ typecheck currDefs state.env.{predefs=[]}
+   where
+    showSymbols (TypecheckResult {state=g}) = ReplResult res state msgs where
+      (res, msgs) = (EvalSuccess, [Message INFO . intercalate newLine $ outlineSymbols g])
+    currDefs = concat . intersperse newLine $ reverse state.env.predefs
+
+typeof expr state = case typecheck expr state.env of
+   Right (TypecheckResult {sourceInfo=Expression{variableName=var},state=g}) ->
+      ReplResult res state msgs where
+          (res, msgs) = maybe (EvalError, [Message ERROR "Not an expression!"])
+                          (\s -> (EvalSuccess, [Message INFO $ getSymbolType s g])) symMaybe
+          symMaybe = fst $ StG.run (resolveSymbol var) g
+   Right (TypecheckResult {state=g})                         -> ReplResult EvalNoOutput state []
+   Left compilerState -> failure state compilerState
+
+docHelp source state
+ | Right (TypecheckResult {state=g}) <- typecheck (currDefs state.env.predefs) state.env.{predefs=[]} = help g
+ | otherwise      = fail
+   where
+     currDefs [] = "\"\""
+     currDefs xs = concat . intersperse newLine $ reverse xs
+     fail = ReplResult EvalError state [Message ERROR (source ++ " cannot be resolved!")]
+     help g = maybe fail (\m -> ReplResult EvalSuccess state $ [Message INFO m]) $ helpDoc source g
+
+data MessageType = INFO | ERROR | WARNING | HINT where
+  translateCompilerMsgType Severity.HINT = HINT
+  translateCompilerMsgType Severity.WARNING = WARNING
+  translateCompilerMsgType Severity.ERROR = ERROR
+derive Show MessageType
+
+data Message = Message {msgType :: MessageType, text :: String} where
+  showMessages = intercalate newLine . map show
+  translateCompilerMessages [] = []
+  translateCompilerMessages ((CompilerMessage.Msg pos sev text):ms) =
+    Message (MessageType.translateCompilerMsgType sev) text : translateCompilerMessages ms
+
+instance Show Message where
+  show (Message INFO txt) = txt
+  show (Message typ txt) = "[" ++ show typ ++ "]: " ++ txt
+
+showVariable var source state g = maybe evalError showSym sym where
+  sym = fst $ StG.run (resolveSymbol var) g
+  evalError = ReplResult EvalError state [Message INFO (var ++ " cannot be resolved!")]
+  showSym = showSymbol source state var g
+
+showSymbol :: String -> ReplEnv -> String -> Global -> Symbol -> ReplResult
+showSymbol source state var g symbol
+  | isVariable g symbol = if isString g symbol
+                            then ReplResult (Interpret className qname.base) state []
+                            else interpret showScript newState
+  | otherwise           = ReplResult EvalSuccess state [Message INFO (getSymbolType symbol g)]
+    where
+         newState = state.{env <- Environment.{predefs <- ((:) (variableDeclScript var source))}}
+         showScript = buildShowScript var g symbol
+         qname = symbol.name
+         className = show $ qname.getpack.className g
+
+failure :: ReplEnv -> Global -> ReplResult
+failure replState interpreterState = ReplResult EvalError replState $
+  Message.translateCompilerMessages interpreterState.sub.messages
+
+javac :: Global -> ReplEnv -> (Global, Maybe ReplEnv)
+javac global state = case javagen global state.env of
+                       Right (JavagenResult {javaSource=javaSrc,state=g, classLoader=loader}) -> (g, Just newState) where
+                         newState = state.{lastJavaSource=Just javaSrc, env<-Environment.{loader=loader}}
+                       Left compilerState -> (compilerState, Nothing)
 
 -- Native Definitions
 
