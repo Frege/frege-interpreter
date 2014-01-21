@@ -1,4 +1,4 @@
-#Frege Scripting#
+#Frege Interpreter#
 
 This project aims to interpret Frege code snippets with on-the-fly in-memory compilation.
 
