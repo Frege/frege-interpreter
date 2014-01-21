@@ -5,57 +5,51 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>frege</groupId>
-    <artifactId>frege-scripting</artifactId>
+    <artifactId>frege-interpreter</artifactId>
     <version>1.0.2-SNAPSHOT</version>
   </parent>
+  <groupId>frege</groupId>
   <artifactId>frege-script-engine</artifactId>
-  <name>frege-script-engine</name>
-  <url>https://github.com/Frege/frege-scripting</url>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <build>
     <plugins>
       <plugin>
-        <groupId>com.theoryinpractise.frege</groupId>
-        <artifactId>frege-maven-plugin</artifactId>
-        <version>${frege.plugin.version}</version>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>2.2.1</version>
         <executions>
           <execution>
-            <id>compile</id>
-            <phase>generate-sources</phase>
+            <id>distro-assembly</id>
+            <phase>package</phase>
             <goals>
-              <goal>compile</goal>
+              <goal>single</goal>
             </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/main/assembly/assembly.xml</descriptor>
+              </descriptors>
+            </configuration>
           </execution>
         </executions>
-        <configuration>
-          <inline>true</inline>
-          <hints>true</hints>
-          <includeStale>false</includeStale>
-        </configuration>
       </plugin>
     </plugins>
   </build>
   <dependencies>
     <dependency>
-      <groupId>frege</groupId>
-      <artifactId>frege</artifactId>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>frege-interpreter-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+          <groupId>frege</groupId>
+          <artifactId>frege</artifactId>
     </dependency>
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>3.8.1</version>
+      <version>4.11</version>
       <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jdt.core.compiler</groupId>
-      <artifactId>ecj</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>${project.groupId}</groupId>
-      <artifactId>frege-interpreter</artifactId>
-      <version>${project.version}</version>
     </dependency>
   </dependencies>
 </project>

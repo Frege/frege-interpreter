@@ -3,16 +3,15 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>frege</groupId>
-  <artifactId>frege-scripting</artifactId>
+  <artifactId>frege-interpreter</artifactId>
   <packaging>pom</packaging>
   <version>1.0.2-SNAPSHOT</version>
-  <name>frege-scripting</name>
-  <url>https://github.com/Frege/frege-scripting</url>
+  <name>frege-interpreter</name>
+  <url>https://github.com/Frege/frege-interpreter</url>
   <modules>
-    <module>memory-javac</module>
-    <module>frege-interpreter</module>
-    <!--<module>frege-script-engine</module>
-    <module>jfrege-script-engine</module>-->
+    <module>frege-interpreter-java-support</module>
+    <module>frege-interpreter-core</module>
+    <module>frege-script-engine</module>
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
