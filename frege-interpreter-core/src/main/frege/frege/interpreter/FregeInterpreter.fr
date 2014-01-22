@@ -208,7 +208,7 @@ typeof expr state = case typecheck expr state of
    Right (TypecheckResult {sourceInfo=Expression{variableName=var},state=g}) ->
       InterpreterResult res state msgs where
           (res, msgs) = maybe (EvalError, [Message ERROR "Not an expression!"])
-                          (\s -> (EvalSuccess, [Message INFO $ getSymbolType s g])) symMaybe
+                          (\s -> (EvalSuccess, [Message INFO $ getSymbolType g s])) symMaybe
           symMaybe = fst $ StG.run (resolveSymbol var) g
    Right _                         -> InterpreterResult EvalError state [Message ERROR "Not an expression!"]
    Left compilerState -> failure state compilerState
@@ -521,12 +521,19 @@ matching _ _ = false
 funcMatching (_@FunDcl{name=x}) (_@FunDcl{name=y}) = x == y
 funcMatching _ _ = false
 
-getSymbolType :: Symbol -> Global -> String
-getSymbolType SymI{typ} !g = EU.verbose g typ
-getSymbolType SymV{typ} !g = EU.verbose g typ
-getSymbolType SymD{typ} !g = EU.verbose g typ
-getSymbolType SymL{alias} !g = maybe "" (flip getSymbolType g) $ alias.findit g
-getSymbolType _ _ = ""
+getSymbolType :: Global -> Symbol -> String
+getSymbolType g SymI{typ} = EU.verbose g typ
+getSymbolType g SymV{typ} = EU.verbose g typ
+getSymbolType g SymD{typ} = EU.verbose g typ
+getSymbolType g SymL{alias} = maybe "" (getSymbolType g) $ alias.findit g
+getSymbolType g SymC{name,tau} = show tau.kind
+getSymbolType g SymT{name, nativ = Just n, pur, mutable}
+    | pur       = "pure native " ++ n
+    | mutable   = "mutable native " ++ n
+    | otherwise = "native " ++ n            
+getSymbolType g sym
+    | sym.{kind?}      = show sym.kind
+    | otherwise        = ""
 
 showSymbol :: Global -> Symbol -> String
 showSymbol g sym = sym.category g ++ " " ++ EU.label g sym
