@@ -3,11 +3,12 @@ package frege.scriptengine;
 import frege.compiler.Data;
 import frege.interpreter.FregeInterpreter;
 import frege.interpreter.FregeInterpreter.TInterpreterResult;
+import frege.interpreter.javasupport.InterpreterClassLoader;
 import frege.interpreter.javasupport.JavaUtils;
-import frege.interpreter.javasupport.MemoryClassLoader;
 import frege.interpreter.javasupport.Ref;
+import frege.prelude.PreludeBase;
 import frege.prelude.PreludeBase.TList;
-import frege.prelude.PreludeList;
+import frege.runtime.Lambda;
 import frege.runtime.Lazy;
 
 import javax.script.AbstractScriptEngine;
@@ -19,7 +20,6 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptEngineFactory;
 import javax.script.ScriptException;
 import javax.script.SimpleBindings;
-import javax.script.SimpleScriptContext;
 import java.io.Reader;
 import java.util.HashMap;
 import java.util.Map;
@@ -51,61 +51,74 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
     @Override
     public Object eval(final String script, final ScriptContext context)
         throws ScriptException {
-        final TInterpreterResult intpRes = FregeInterpreter.interpret(script, toReplEnv(context)).forced();
-        return toEvalResult(intpRes, context);
+        final Lambda res = FregeInterpreter.interpret(script, predefs(context));
+        final PreludeBase.TTuple2 intpRes = FregeInterpreter.TInterpreter.run(res, classLoader(context)).forced();
+        return toEvalResult(intpRes, context, script);
     }
 
-    private FregeInterpreter.TInterpreterEnv toReplEnv(final ScriptContext context) {
-        MemoryClassLoader classLoader = (MemoryClassLoader) context.getAttribute(CLASSLOADER_KEY);
+    private InterpreterClassLoader classLoader(final ScriptContext context) {
+        InterpreterClassLoader classLoader = (InterpreterClassLoader) context.getAttribute(CLASSLOADER_KEY);
         if (classLoader == null) {
-            classLoader = new MemoryClassLoader();
+            classLoader = new InterpreterClassLoader();
         }
+        return classLoader;
+    }
+
+    private TList predefs(final ScriptContext context) {
         TList predefs = (TList) context.getAttribute(DEFS_KEY);
         if (predefs == null) {
             predefs = TList.DList.mk();
         }
-        final FregeInterpreter.TInterpreterEnv defaultEnv = FregeInterpreter.TInterpreterEnv._default.forced();
-        final FregeInterpreter.TInterpreterEnv environment = FregeInterpreter.TInterpreterEnv.mk(classLoader,
-            predefs, defaultEnv.mem$transformDefs);
-        return environment;
+        return predefs;
     }
 
-    private Object toEvalResult(final TInterpreterResult replResult, final ScriptContext context) throws ScriptException {
-        final FregeInterpreter.TInterpreterResultType out = replResult.mem$typ.forced();
-        final String message = toJavaValue(FregeInterpreter.TMessage.showMessages(FregeInterpreter.IShow_Message.it,
-            replResult.mem$messages.<TList>forced()));
-        final FregeInterpreter.TInterpreterEnv env = replResult.mem$env.forced();
-        final MemoryClassLoader classLoader = toJavaValue(env.mem$loader);
-        final TList newPredefs = env.mem$predefs.forced();
+    private Object toEvalResult(final PreludeBase.TTuple2 tup, final ScriptContext context,
+                                final String script) throws ScriptException {
+        final FregeInterpreter.TInterpreterResult interpRes = toJavaValue(tup.mem1);
+        final InterpreterClassLoader classLoader = toJavaValue(tup.mem2);
         Object res = null;
-        switch (out._constructor()) {
-            case 0: // EvalErr
-                throw new ScriptException(message);
-            case 2: // Def
-                context.setAttribute(DEFS_KEY, newPredefs, ScriptContext.ENGINE_SCOPE);
-                break;
-            case 3: // ModuleDef
-                context.setAttribute(CLASSLOADER_KEY, classLoader, ScriptContext.ENGINE_SCOPE);
-                break;
-            case 4:
-                FregeInterpreter.TInterpreterResultType.DInterpret interpret = out._Interpret();
-                final Data.TSymbol sym = toJavaValue(interpret.mem1);
-                final Data.TGlobal global = toJavaValue(interpret.mem2);
-                final String className = toJavaValue(FregeInterpreter.symbolClass(sym, global));
-                final String varName = toJavaValue(FregeInterpreter.symbolVar(sym));
-                Map<String, Object> bindings = (Map<String, Object>) context.getAttribute(FREGE_BINDINGS_KEY);
-                try {
-                    if (bindings != null && !bindings.isEmpty()) {
-                        Class<?> preludeClass = classLoader.loadClass(PRELUDE_SCRIPT_CLASS_NAME);
-                        JavaUtils.injectValues(bindings, preludeClass);
-                    }
-                    res = JavaUtils.fieldValue(className, varName, classLoader);
-                } catch (Throwable throwable) {
-                    throw new ScriptException(throwable.toString());
+        switch (interpRes._constructor()) {
+            case 0: //Success
+                TInterpreterResult.DSuccess success = interpRes._Success();
+                final String message = toJavaValue(
+                    FregeInterpreter.TMessage.showMessages(FregeInterpreter.IShow_Message.it,
+                                                           success.mem$messages.<TList>forced()));
+                final FregeInterpreter.TSourceInfo srcinfo = toJavaValue(success.mem$sourceRepr);
+                final Data.TGlobal compilerState = toJavaValue(success.mem$compilerState);
+                switch (srcinfo._constructor()) {
+                    case 0: //Module
+                        context.setAttribute(CLASSLOADER_KEY, classLoader, ScriptContext.ENGINE_SCOPE);
+                        break;
+                    case 1: //Expression
+                        final Data.TSymbol sym = toJavaValue(srcinfo._Expression().mem1);
+                        final String className = toJavaValue(FregeInterpreter.symbolClass(sym, compilerState));
+                        final String varName = toJavaValue(FregeInterpreter.symbolVar(sym));
+                        res = evalSym(context, classLoader, className, varName);
+                        break;
+                    case 2: //Definitions
+                        context.setAttribute(DEFS_KEY,
+                            TList.DCons.mk(script, predefs(context)),
+                            ScriptContext.ENGINE_SCOPE);
+                        break;
                 }
-                break;
-            default:
-                break;
+        }
+        return res;
+    }
+
+    private Object evalSym(final ScriptContext context,
+                           final InterpreterClassLoader classLoader,
+                           final String className,
+                           final String varName) throws ScriptException {
+        final Object res;
+        Map<String, Object> bindings = (Map<String, Object>) context.getAttribute(FREGE_BINDINGS_KEY);
+        try {
+            if (bindings != null && !bindings.isEmpty()) {
+                Class<?> preludeClass = classLoader.loadClass(PRELUDE_SCRIPT_CLASS_NAME);
+                JavaUtils.injectValues(bindings, preludeClass);
+            }
+            res = JavaUtils.fieldValue(className, varName, classLoader);
+        } catch (Throwable throwable) {
+            throw new ScriptException(throwable.toString());
         }
         return res;
     }
@@ -159,39 +172,12 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
 
     @Override
     public CompiledScript compile(final String script) throws ScriptException {
-        final ScriptContext compileContext = new SimpleScriptContext();
-        final TInterpreterResult replResult = FregeInterpreter.interpret(script, toReplEnv(compileContext)).forced();
-        final FregeInterpreter.TInterpreterResultType out = replResult.mem$typ.forced();
-        final String message = toJavaValue(FregeInterpreter.TMessage.showMessages(FregeInterpreter.IShow_Message.it,
-            replResult.mem$messages.<TList>forced()));
-        if (out._constructor() == 0) { // EvalError
-            throw new ScriptException(message);
-        }
-        final FregeInterpreter.TInterpreterEnv env = replResult.mem$env.forced();
-        final TList newPredefs = env.mem$predefs.forced();
-        final MemoryClassLoader compiledClassLoader = toJavaValue(env.mem$loader);
+        final Lambda res = FregeInterpreter.interpret(script, predefs(context));
+        final PreludeBase.TTuple2 intpRes = FregeInterpreter.TInterpreter.run(res, classLoader(context)).forced();
         return new CompiledScript() {
             @Override
             public Object eval(final ScriptContext context) throws ScriptException {
-                final Object res = toEvalResult(replResult, compileContext);
-                if (out._constructor() == 2) { // Def
-                    TList predefs = (TList) context.getAttribute(DEFS_KEY);
-                    if (predefs == null) {
-                        predefs = TList.DList.mk();
-                    }
-                    context.setAttribute(DEFS_KEY,
-                        PreludeList.IListLike__lbrack_rbrack._plus_plus(newPredefs, predefs),
-                        ScriptContext.ENGINE_SCOPE);
-                } else if (out._constructor() == 3) { // ModuleDef
-                    MemoryClassLoader classLoader = (MemoryClassLoader) context.getAttribute(CLASSLOADER_KEY);
-                    if (classLoader == null) {
-                        classLoader = new MemoryClassLoader();
-                        context.setAttribute(CLASSLOADER_KEY, classLoader, ScriptContext.ENGINE_SCOPE);
-                    }
-                    classLoader.addClasses(compiledClassLoader.classes());
-
-                }
-                return res;
+                return toEvalResult(intpRes, context, script);
             }
 
             @Override

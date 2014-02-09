@@ -38,7 +38,7 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
   private static final CompilerOptions options;
   private static final IErrorHandlingPolicy errorHandlingPolicy;
   private static final IProblemFactory problemFactory;
-  private final MemoryClassLoader classLoader;
+  private final InterpreterClassLoader classLoader;
 
   static {
       options = getCompilerOptions();
@@ -51,9 +51,9 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
         Collections.<String, byte[]>emptyMap());
   }
 
-  public MemoryJavaCompiler(final MemoryClassLoader memoryClassLoader) {
+  public MemoryJavaCompiler(final InterpreterClassLoader classLoader) {
        this(Thread.currentThread().getContextClassLoader(),
-         memoryClassLoader.classes());
+         classLoader.classes());
   }
 
   public MemoryJavaCompiler(final Map<String, byte[]> bytecodes) {
@@ -64,7 +64,7 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
   public MemoryJavaCompiler(
       final ClassLoader parent,
       final Map<String, byte[]> bytecodes) {
-    this.classLoader = new MemoryClassLoader(
+    this.classLoader = new InterpreterClassLoader(
         parent, bytecodes);
   }
 
@@ -115,7 +115,7 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
 
   }
 
-  public MemoryClassLoader classLoader() {
+  public InterpreterClassLoader classLoader() {
     return classLoader;
   }
 
@@ -136,10 +136,10 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
   }
 
   private static class CompilerRequestor implements ICompilerRequestor {
-    private final MemoryClassLoader classLoader;
+    private final InterpreterClassLoader classLoader;
     private final List<CompilationResult> results;
 
-    public CompilerRequestor(final MemoryClassLoader classLoader) {
+    public CompilerRequestor(final InterpreterClassLoader classLoader) {
       this.classLoader = classLoader;
       this.results = new ArrayList<CompilationResult>();
     }
