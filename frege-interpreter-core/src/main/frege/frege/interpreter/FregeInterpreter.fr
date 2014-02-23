@@ -3,6 +3,7 @@
 -}
 module frege.interpreter.FregeInterpreter where
 
+import frege.Prelude hiding (Reader)
 import Compiler.Scanner hiding (main, is, interpret)
 import Compiler.Main(stdOptions, format,
   make, parsePass, postTrue, getOperators)
@@ -35,6 +36,46 @@ import Compiler.DocUtils as DU(docit, docSym, DL, Doc, emitHtml)
 import Compiler.Import(getFP, importClass)
 import Java.Net
 import Data.Map as M()
+import Control.monad.Reader
+import Control.monad.State (evalState, execState)
+import Control.arrow.Kleisli
+
+data Interpreter config st a = Interpreter {
+    unInterpreter :: ReaderT (State st) config a
+  } where
+
+  get = Interpreter (Kleisli (\_ -> State.get))
+  put s = Interpreter (Kleisli (\_ -> State.put s))
+  ask = Interpreter Reader.ask
+  modify f = do
+      s <- Interpreter.get
+      Interpreter.put (f s)
+
+  run (Interpreter interpreter) = State.run . Kleisli.run interpreter
+  eval (Interpreter interpreter) = State.evalState . Kleisli.run interpreter
+  exec (Interpreter interpreter) = State.execState . Kleisli.run interpreter
+
+instance Monad (Interpreter config st) where
+  return = Interpreter . return
+  (Interpreter r) >>= f = Interpreter $ r >>= g where
+     g = Interpreter.unInterpreter . f
+
+data InterpreterConfig = InterpreterConfig {
+    predefs :: [String],
+    transformDefs :: [Definition] -> StG [Definition]
+  } where
+
+  default = InterpreterConfig {
+    predefs = [],
+    transformDefs = removeDuplicateDefs
+  }
+
+data InterpreterState = InterpreterState {
+  classLoader :: InterpreterClassLoader
+}
+
+type InterpreterApp = Interpreter InterpreterConfig InterpreterState
+
 
 --- utility function to create 'Options' data structure
 createopts sp flags dir path prefix source = stdOptions.{
@@ -97,31 +138,17 @@ standardOptions classLoader = do
 
 data InterpreterResult = Success
                          { sourceRepr :: SourceInfo,
-                           compilerState :: Global,
-                           messages :: [Message]
+                           compilerState :: Global
                          }
                        | Failure [Message]
 
 
-data Interpreter a = Interpreter {un :: State InterpreterClassLoader a} where
-  get = Interpreter $ State.get
-  put s = Interpreter $ State.put s
-  modify f = do
-      s <- Interpreter.get
-      Interpreter.put (f s)
-  run (Interpreter s) loader = s.run loader
-  runWithDefault (Interpreter s) = s.run InterpreterClassLoader.default
-
-instance Monad Interpreter where
-  return = Interpreter . return
-  (Interpreter state) >>= f = Interpreter $ state >>= (\a -> Interpreter.un $ f a)
-
-javagen :: Global -> Interpreter (Maybe String, Global)
+javagen :: Global -> InterpreterApp (Maybe String, Global)
 javagen global = do
-  loader <- Interpreter.get
+  state <- Interpreter.get
   let javagenST = do
                     javaSourceWriter <- doio $ StringWriter.new () -- Java source will be written here
-                    classLoader <- doio $ Mutable.thaw loader
+                    classLoader <- doio $ Mutable.thaw state.classLoader
                     javac <- doio $ MemoryJavaCompiler.new classLoader
                     let steps = javagenPasses javaSourceWriter javac
                     foreach steps runpass
@@ -131,76 +158,79 @@ javagen global = do
                            classLoader <- doio $ javac.classLoader >>= Mutable.freeze
                            javaSource <- doio $ javaSourceWriter.toString
                            return (classLoader, Just javaSource)
-                        else return (loader, Nothing)
+                        else return (state.classLoader, Nothing)
   let ((loader, jsrc), g) = StG.run javagenST global
-  Interpreter.put loader
+  Interpreter.put $ InterpreterState loader
   return (jsrc, g)
 
-typecheck :: String -> [String] -> Interpreter (Global, Maybe SourceInfo)
-typecheck src predefs = do
-  loader <- Interpreter.get
-  let predefsSrc = intercalate newLine $ reverse predefs
-  let (sourceType, global) = StG.run (run src predefsSrc typecheckPasses) (interpreterCompilerEnv loader)
+typecheck :: String -> InterpreterApp (Global, Maybe SourceInfo)
+typecheck src = do
+  config <- Interpreter.ask
+  state <- Interpreter.get
+  let predefsSrc = intercalate newLine $ reverse config.predefs
+      (sourceType, global) = StG.run (run src predefsSrc (typecheckPasses config)) (interpreterCompilerEnv state.classLoader)
   return (global, sourceType)
 
-interpret :: String -> [String] -> Interpreter InterpreterResult
-interpret line predefs = do
-  (tcGlobal, srcInfo) <- typecheck line predefs
+interpret :: String ->  InterpreterApp InterpreterResult
+interpret line = do
+  (tcGlobal, srcInfo) <- typecheck line
   case srcInfo of
     Just sourceInfo ->
       case sourceInfo of
-        Definitions syms -> return $ InterpreterResult.Success sourceInfo tcGlobal msgs where
-          msgs = filter (\m -> Position.line m.pos > minPos) (Message.fromGlobal tcGlobal)
-          minPos = succ . length . lines $ intercalate newLine predefs
+        Definitions syms -> return $ InterpreterResult.Success sourceInfo tcGlobal
         _ -> do
                (jsrc, g) <- javagen tcGlobal
                let fail = InterpreterResult.Failure (Message.fromGlobal g)
-                   success = InterpreterResult.Success sourceInfo g (Message.fromGlobal g)
+                   success = InterpreterResult.Success sourceInfo g
                return $ maybe fail (const success) jsrc
     Nothing -> return (InterpreterResult.Failure $ Message.fromGlobal tcGlobal)
 
-browseModule :: String -> Interpreter (Maybe ([Symbol], Global))
+browseModule :: String -> InterpreterApp (Maybe ([Symbol], Global))
 browseModule moduleName = do
-  loader <- Interpreter.get
-  let (syms, g) = StG.run (moduleSymbols moduleName) $ stdCompilerEnv loader
+  state <- Interpreter.get
+  let (syms, g) = StG.run (moduleSymbols moduleName) $ stdCompilerEnv state.classLoader
   case syms of
     [] -> return Nothing
     _ -> return $ Just (syms, g)
 
-browse :: [String] -> Interpreter (Maybe ([Symbol], Global))
-browse [] = return Nothing
-browse defs = do
-  let currDefs = concat . intersperse newLine $ reverse defs
-  res <- interpret currDefs []
+browse :: String -> InterpreterApp (Maybe ([Symbol], Global))
+browse src = do
+  res <- interpret src
   case res of
     InterpreterResult.Success {sourceRepr=Definitions syms, compilerState=g} -> return $ Just (syms, g)
     _ -> return Nothing
 
-typeof :: String -> [String] -> Interpreter ([Message] | String)
-typeof expr predefs = do
-  res <- typecheck expr predefs
+typeof :: String -> InterpreterApp ([Message] | String)
+typeof expr = do
+  res <- typecheck expr
   case res of
    (g, Just (Expression s)) -> return . Right $ getSymbolType g s
    (_, Just _)              -> return . Left $ [Message.info "Not an expression!"]
    (g, _)            -> return . Left $ map (Message.fromCompilerMessage) g.sub.messages
 
 
-javaSource :: String -> [String] -> Interpreter ([Message] | String)
-javaSource line predefs = do
-  (g, srcInfo) <- typecheck line predefs
+javaSource :: String -> InterpreterApp ([Message] | String)
+javaSource line = do
+  (g, srcInfo) <- typecheck line
   let f = do
             (jsrcMaybe, javagenGlobal) <- javagen g
             return $ maybe (Left $ Message.fromGlobal javagenGlobal) Right jsrcMaybe
   maybe (return . Left $ Message.fromGlobal g) (const f) srcInfo
 
-docHelp :: String -> [String] -> Interpreter ([Message] | String)
-docHelp source predefs = do
-   let currDefs [] = "\"\""
-       currDefs xs = concat . intersperse newLine $ reverse xs
-       fail = [Message.error (source ++ " cannot be resolved!")]
+docHelp :: String -> InterpreterApp ([Message] | String)
+docHelp source = do
+   let fail = [Message.error (source ++ " cannot be resolved!")]
        help g = maybe (Left fail) Right $ helpDoc source g
-   (g, srcInfo) <- typecheck (currDefs predefs) []
+   (g, srcInfo) <- typecheck "\"\""
    return $ maybe (Left $ Message.fromGlobal g) (const $ help g) srcInfo
+
+removeDuplicateDefs :: [Definition] -> StG [Definition]
+removeDuplicateDefs defs = do
+  let ds = nubBy matching $ reverse defs
+      fm (x:xs) (y:ys) = funcMatching x y
+      fm _ _ = false
+      uniqds = reverse . concat $ nubBy fm $ groupBy funcMatching ds
+  return uniqds
 
 data MessageType = INFO | ERROR | WARNING | HINT where
   translateCompilerMsgType Severity.HINT = HINT
@@ -220,13 +250,6 @@ data Message = Message {pos :: Position, msgType :: MessageType, text :: String}
 instance Show Message where
   show (Message pos INFO txt) = txt
   show (Message pos typ txt) = "[" ++ show typ ++ ": " ++ show pos ++ "]: " ++ txt
-
-defSymbols :: Global -> String -> [Symbol]
-defSymbols global predefs = filter f $ getSymbols global.thisTab
-  where
-    f sym = Position.line sym.pos > pos
-    pos = succ . length $ lines predefs
-
 
 symbolVar :: Symbol -> String
 symbolVar symbol = symbol.name.base
@@ -251,7 +274,7 @@ run src predefs steps = do
     if g.errors == 0
       then case scriptType of
                 ModuleSource -> return . Just $ SourceInfo.Module $ className g
-                DefinitionsSource -> return . Just $ SourceInfo.Definitions $ defSymbols g predefs
+                DefinitionsSource -> return . Just $ SourceInfo.Definitions $ getSymbols g.thisTab
                 ExpressionSource -> return $ SourceInfo.Expression <$> fst (StG.run (resolveSymbol varName) g)
       else return Nothing
 
@@ -438,10 +461,10 @@ javagenPasses jw javac = [
     (javacPass javac jw,           "run java compiler                     ", postTrue)
     ]
 
-typecheckPasses src = [
+typecheckPasses (config :: InterpreterConfig) src = [
   -- function       description                            post condition
   (lexPass src,         "lexical analysis                      ", postTrue),
-  (iparsePass,      "syntax  analysis                      ", postTrue),
+  (iparsePass config.transformDefs,      "syntax  analysis                      ", postTrue),
   (P1.pass,         "collecting definitions                ", P1.post),
   (P2.pass,         "symbol table initialization and import", P2.post),
   (P6.passI true,   "verify imported instances             ", P6.post),
@@ -475,7 +498,6 @@ matching (_@TypDcl{name=x}) (_@TypDcl{name=y}) = x == y
 matching (_@ClaDcl{name=x}) (_@ClaDcl{name=y}) = x == y
 matching (_@AnnDcl{name=x}) (_@AnnDcl{name=y}) = x == y
 matching (_@NatDcl{name=x}) (_@NatDcl{name=y}) = x == y
-matching (_@FunDcl{name=x,pats=[]}) (_@FunDcl{name=y,pats=[]}) = x == y
 matching (_@DatDcl{name=x}) (_@DatDcl{name=y}) = x == y
 matching (_@JavDcl{name=x}) (_@JavDcl{name=y}) = x == y
 matching _ _ = false
@@ -515,18 +537,15 @@ getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
             | otherwise                          = true
 
 
-iparsePass = do
+iparsePass f = do
     g       <- getST
     let tokens = (filter noComment g.sub.toks.toList)
     result <- Parse.pass tokens
     case result of
         Just (GUtil.Program.Module (packname, defs, doc)) -> do
             changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
-            let ds = nubBy matching $ reverse defs
-                fm (x:xs) (y:ys) = funcMatching x y
-                fm _ _ = false
-                uniqds = concat $ nubBy fm $ groupBy funcMatching ds
-            changeST Global.{sub <- (SubSt.{definitions = reverse uniqds}
+            newDefs <- f defs
+            changeST Global.{sub <- (SubSt.{definitions = newDefs }
                                      • SubSt.{packageDoc = Nothing})}
             stio ("tokens",  g.sub.toks.length)
         Just _ -> error "FATAL: Expected module"
@@ -573,7 +592,6 @@ isVariable _ _ = false
 isIO :: Global -> Symbol -> Bool
 isIO g SymV{typ} = "ST RealWorld" `isPrefix` nice typ g where
                       isPrefix = isPrefixOf `on` toList
-                      f `on` g = \x \y -> f (g x) (g y)
 isIO g SymL{alias} = maybe false (isIO g) $ alias.findit g
 isIO _ _ = false
 
@@ -581,6 +599,9 @@ isString g SymV{typ} = nice typ g == "StringJ Char"
 isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
 
+f `on` g = \x \y -> f (g x) (g y)
+
+-- Find the cause not more than 10 level deep
 showThrowableCause t = showThrowableCause' 10 t
 
 showThrowableCause' depth t | depth <= 0 = showNative t
