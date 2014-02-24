@@ -101,6 +101,14 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
                             ScriptContext.ENGINE_SCOPE);
                         break;
                 }
+                break;
+            case 1:
+                TInterpreterResult.DFailure failure = interpRes._Failure();
+                final TList msgs = toJavaValue(failure.mem1);
+                final String errorMsg = toJavaValue(
+                    FregeInterpreter.TMessage.showMessages(FregeInterpreter.IShow_Message.it, msgs));
+                throw new ScriptException(errorMsg);
+
         }
         return res;
     }
