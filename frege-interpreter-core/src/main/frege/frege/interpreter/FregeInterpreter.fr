@@ -245,6 +245,8 @@ data Message = Message {pos :: Position, msgType :: MessageType, text :: String}
 
   info txt = Message Position.null INFO txt
   error txt = Message Position.null ERROR txt
+  hint txt = Message Position.null HINT txt
+  warning txt = Message Position.null WARNING txt
   fromGlobal (g :: Global) = map fromCompilerMessage g.sub.messages
 
 instance Show Message where
