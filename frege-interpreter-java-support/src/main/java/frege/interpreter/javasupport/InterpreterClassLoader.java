@@ -11,28 +11,27 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-public class MemoryClassLoader extends URLClassLoader implements
+public class InterpreterClassLoader extends URLClassLoader implements
         INameEnvironment, Cloneable, Serializable {
     private final Map<String, byte[]> classes;
 
-    public MemoryClassLoader() {
+    public InterpreterClassLoader() {
         this(Thread.currentThread().getContextClassLoader(), new HashMap<String, byte[]>());
     }
 
-    public MemoryClassLoader(final Map<String, byte[]> classes) {
+    public InterpreterClassLoader(final Map<String, byte[]> classes) {
         this(Thread.currentThread().getContextClassLoader(), classes);
     }
 
-    public MemoryClassLoader(final ClassLoader parent) {
+    public InterpreterClassLoader(final ClassLoader parent) {
         this(parent, new HashMap<String, byte[]>());
     }
 
-    public MemoryClassLoader(final ClassLoader parent,
-                             final Map<String, byte[]> classFiles) {
+    public InterpreterClassLoader(final ClassLoader parent,
+                                  final Map<String, byte[]> classFiles) {
         super(new URL[0], parent);
         this.classes = classFiles;
     }
@@ -121,6 +120,6 @@ public class MemoryClassLoader extends URLClassLoader implements
 
     @Override
     public Object clone() {
-        return new MemoryClassLoader((HashMap<String, byte[]>)new HashMap<>(classes).clone());
+        return new InterpreterClassLoader((HashMap<String, byte[]>)new HashMap<>(classes).clone());
     }
 }
