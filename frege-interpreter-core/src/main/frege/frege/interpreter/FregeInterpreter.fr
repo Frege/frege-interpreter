@@ -95,7 +95,7 @@ standardOptions classLoader = do
                 cache,
                 loader = classLoader,
                 optab = Tree.empty,
-                toks = Array.fromList [],
+                toks = arrayFromList [],
                 idKind = Tree.empty,
                 definitions = [],
                 packageDoc = Nothing,
@@ -142,6 +142,20 @@ data InterpreterResult = Success
                          }
                        | Failure [Message]
 
+javaSourceGen :: Global -> InterpreterApp (Maybe String, Global)
+javaSourceGen global = do
+  state <- Interpreter.get
+  let javagenST = do
+                    javaSourceWriter <- doio $ StringWriter.new () -- Java source will be written here
+                    let steps = javaSourcePasses javaSourceWriter
+                    foreach steps runpass
+                    global <- getST
+                    if global.errors == 0
+                        then do
+                           javaSource <- doio $ javaSourceWriter.toString
+                           return (Just javaSource)
+                        else return Nothing
+  return $ StG.run javagenST global
 
 javagen :: Global -> InterpreterApp (Maybe String, Global)
 javagen global = do
@@ -213,7 +227,7 @@ javaSource :: String -> InterpreterApp ([Message] | String)
 javaSource line = do
   (g, srcInfo) <- typecheck line
   let f = do
-            (jsrcMaybe, javagenGlobal) <- javagen g
+            (jsrcMaybe, javagenGlobal) <- javaSourceGen g
             return $ maybe (Left $ Message.fromGlobal javagenGlobal) Right jsrcMaybe
   maybe (return . Left $ Message.fromGlobal g) (const f) srcInfo
 
@@ -452,14 +466,18 @@ openPrinter pw = do
     changeST Global.{gen <- GenSt.{printer=printer}}
     stio ("file", 1)
 
-javagenPasses jw javac = [
+javaSourcePasses jw = [
     -- function       description                            post condition
     (P7.pass9,        "simplify expressions                  ", P7.post),   -- TRACE9
     (P7.pass8,        "globalize anonymous lambdas           ", P7.post),   -- TRACE8
     (P7.pass10,       "strictness analysis                   ", P7.post),   -- TRACES
     (openPrinter jw,     "open file                             ", postTrue),
     (GM.pass,         "generate meta data                    ", GM.post),   -- none
-    (G7.pass,         "generate java code                    ", G7.post),  -- TRACEG
+    (G7.pass,         "generate java code                    ", G7.post)  -- TRACEG
+    ]
+
+javagenPasses jw javac = javaSourcePasses jw ++ [
+    -- function       description                            post condition
     (javacPass javac jw,           "run java compiler                     ", postTrue)
     ]
 
@@ -575,7 +593,7 @@ expressionPass src = do
         return $ g.errors == 0
 
 lexPass src = do
-    changeST Global.{sub <- SubSt.{toks = Array.fromList []}
+    changeST Global.{sub <- SubSt.{toks = arrayFromList []}
                             . SubSt.{definitions = []}
                             . SubSt.{packageDoc  = Nothing}
                             . SubSt.{thisPack    = Pack.new ""}}
@@ -600,8 +618,6 @@ isIO _ _ = false
 isString g SymV{typ} = nice typ g == "StringJ Char"
 isString g SymL{alias} = maybe false (isString g) $ alias.findit g
 isString g _ = false
-
-f `on` g = \x \y -> f (g x) (g y)
 
 -- Find the cause not more than 10 level deep
 showThrowableCause t = showThrowableCause' 10 t

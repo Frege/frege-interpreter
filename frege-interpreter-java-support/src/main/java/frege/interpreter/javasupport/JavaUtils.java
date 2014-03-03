@@ -1,5 +1,6 @@
 package frege.interpreter.javasupport;
 
+import java.io.FilePermission;
 import java.lang.reflect.Field;
 import java.security.Permission;
 import java.util.Map;
@@ -47,6 +48,13 @@ public class JavaUtils {
                     if (perm instanceof RuntimePermission) {
                         final RuntimePermission runtimePerm = (RuntimePermission) perm;
                         if (runtimePerm.getName().equals("accessDeclaredMembers")) {
+                            return;
+                        }
+                    } else if (perm instanceof FilePermission) {
+                        final FilePermission filePerm = (FilePermission) perm;
+                        final String fileName = filePerm.getName();
+                        if (filePerm.getActions().equals("read") &&
+                            (fileName.endsWith(".jar") || fileName.endsWith(".class"))) {
                             return;
                         }
                     }
