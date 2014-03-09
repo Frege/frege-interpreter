@@ -8,6 +8,7 @@ import Compiler.Scanner hiding (main, is, interpret)
 import Compiler.Main(stdOptions, format,
   make, parsePass, postTrue, getOperators)
 import Compiler.GUtil as GUtil()
+import frege.compiler.types.Flags as Compilerflags(Flag, Flags)
 import Lib.PP(TEXT)
 import Data.List
 import Data.Maybe
@@ -102,7 +103,8 @@ standardOptions classLoader = do
                 thisPos  = Position.null,
                 nsPos = Tree.empty,
                 thisPack = Pack.new "",
-                errors  = 0,
+                numErrors  = 0,
+                resErrors = 0,
                 messages = [],
                 cancelled = return false,
                 nextPass = 1,
@@ -314,7 +316,7 @@ runpass (pass,description,post) = do
         postconditionHolds <- if state.errors == 0 then post else stio true
         unless (postconditionHolds) do
             doio (state.stderr.println "FATAL: post condition violated")
-            changeST Global.{sub <- SubSt.{errors <- (1+)}}
+            changeST Global.{sub <- SubSt.{numErrors <- (1+)}}
         stio ()
 
 derive Show Severity
@@ -628,7 +630,7 @@ showThrowableCause' depth t = maybe (showNative t) (showThrowableCause' (pred de
 -- Native Definitions
 
 data MemoryJavaCompiler = native frege.interpreter.javasupport.MemoryJavaCompiler where
-  native new :: Mutable s (JMap String ByteArr) -> STMutable s MemoryJavaCompiler
+  native new :: Mutable s (JMap String ByteArray) -> STMutable s MemoryJavaCompiler
               | Mutable s InterpreterClassLoader -> STMutable s MemoryJavaCompiler
   native compile :: Mutable s MemoryJavaCompiler -> String -> String -> STMutable s JavaCompilationInfo
   native classLoader :: Mutable s MemoryJavaCompiler ->  STMutable s InterpreterClassLoader
@@ -636,8 +638,8 @@ data MemoryJavaCompiler = native frege.interpreter.javasupport.MemoryJavaCompile
 data InterpreterClassLoader = native frege.interpreter.javasupport.InterpreterClassLoader where
   native new :: () -> STMutable s InterpreterClassLoader
               | ClassLoader -> IOMutable InterpreterClassLoader
-              | Mutable s (JMap String ByteArr) -> STMutable s InterpreterClassLoader
-  pure native classes :: InterpreterClassLoader -> JMap String ByteArr
+              | Mutable s (JMap String ByteArray) -> STMutable s InterpreterClassLoader
+  pure native classes :: InterpreterClassLoader -> JMap String ByteArray
 
   private defaultClassLoaderST = do
                     loader <- InterpreterClassLoader.new ()
@@ -652,9 +654,13 @@ data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo 
   native isSuccess :: Mutable s JavaCompilationInfo -> ST s Bool
   native errorsAsString :: Mutable s JavaCompilationInfo -> ST s String
   native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
-  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArr)
+  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArray)
 
-data ByteArr = mutable native "byte[]"
+
+data Byte = pure native byte
+derive ArrayElement Byte
+
+type ByteArray = JArray Byte
 
 data JMap k v = native java.util.Map where
   native put :: Mutable s (JMap k v) -> k -> v -> ST s ()
@@ -671,43 +677,12 @@ native fieldValue frege.interpreter.javasupport.JavaUtils.fieldValue ::
   String -> String -> InterpreterClassLoader -> ST s (Maybe a)
 
 native sandboxFieldValue frege.interpreter.javasupport.JavaUtils.sandboxFieldValue ::
-  String -> String -> InterpreterClassLoader -> ST s (Maybe a)
+  String -> String -> String -> StringWriter -> StringWriter -> InterpreterClassLoader -> IO (Maybe a)
 
 pure native longToString Long.toString :: Long -> Int -> String
 
 pure native showNative String.valueOf :: a -> String
 pure native throwableCause getCause :: Throwable -> Maybe Throwable
-
-
-data ObjectArr = native "java.lang.Object[]" where
-    --- make a new mutable Object array
-    native new    "java.lang.Object[]"
-                                                :: Int -> STMutable s ObjectArr
-    native getAt  "frege.runtime.Array.<java.lang.Object>arrayGet"
-                                                :: Mutable s ObjectArr -> Int -> ST s (Maybe Object)
-    native setAt  "frege.runtime.Array.<java.lang.Object>arraySet"
-                                                :: Mutable s ObjectArr -> Int -> Object -> ST s ()
-    pure native frozenGetAt "frege.runtime.Array.<java.lang.Object>arrayGet"
-                                                :: ObjectArr -> Int -> Maybe Object
-    --- use this only if it is absolutely sure that there are no nulls in the array
-    pure native elemAt "frege.runtime.Array.<java.lang.Object>arrayGet"
-                                                :: ObjectArr -> Int -> Object
-    --- the length of the array
-    pure native length "frege.runtime.Array.<java.lang.Object>arrayLen"
-                                                :: ObjectArr -> Int
-    toList (a::ObjectArr) = elems a 0
-        where
-            elems (a::ObjectArr) i
-                | i < a.length = case frozenGetAt a i of
-                    Just s  -> s:elems a (i+1)
-                    Nothing -> elems a (i+1)
-                | otherwise = []
-
-    fromListST :: [Object] -> STMutable u ObjectArr
-    fromListST objects = (ObjectArr.new objects.length >>= loop 0 objects) where
-        loop j (x:xs) arr = do ObjectArr.setAt arr j x; loop (j+1) xs arr
-        loop j []     arr = return arr
-    fromList objects = ST.run (fromListST objects >>= readonly id)
 
 data Method = pure native java.lang.reflect.Method where
   pure native getName :: Method -> String
