@@ -5,7 +5,7 @@
   <groupId>frege</groupId>
   <artifactId>frege-interpreter</artifactId>
   <packaging>pom</packaging>
-  <version>1.0.2-SNAPSHOT</version>
+  <version>1.0.2</version>
   <name>frege-interpreter</name>
   <url>https://github.com/Frege/frege-interpreter</url>
   <modules>
@@ -15,7 +15,7 @@
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <frege.version>3.21.402-g0b89544</frege.version>
+    <frege.version>3.21.440-gd7ba043</frege.version>
     <frege.plugin.version>1.0.5</frege.plugin.version>
     <ecj.version>4.2.2</ecj.version>
   </properties>
