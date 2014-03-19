@@ -5,7 +5,7 @@
   <groupId>frege</groupId>
   <artifactId>frege-interpreter</artifactId>
   <packaging>pom</packaging>
-  <version>1.0.2</version>
+  <version>1.0.3-SNAPSHOT</version>
   <name>frege-interpreter</name>
   <url>https://github.com/Frege/frege-interpreter</url>
   <modules>

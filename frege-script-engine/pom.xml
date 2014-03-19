@@ -6,7 +6,7 @@
   <parent>
     <groupId>frege</groupId>
     <artifactId>frege-interpreter</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3-SNAPSHOT</version>
   </parent>
   <groupId>frege</groupId>
   <artifactId>frege-script-engine</artifactId>

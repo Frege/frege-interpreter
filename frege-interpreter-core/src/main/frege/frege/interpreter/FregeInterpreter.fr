@@ -263,7 +263,7 @@ data Message = Message {pos :: Position, msgType :: MessageType, text :: String}
   error txt = Message Position.null ERROR txt
   hint txt = Message Position.null HINT txt
   warning txt = Message Position.null WARNING txt
-  fromGlobal (g :: Global) = map fromCompilerMessage g.sub.messages
+  fromGlobal (g :: Global) = reverse $ map fromCompilerMessage g.sub.messages
 
 instance Show Message where
   show (Message pos INFO txt) = txt
@@ -358,7 +358,7 @@ findScriptType src = fst $ StG.run f (interpreterCompilerEnv InterpreterClassLoa
 
 scriptTypePass src = do
   g <- getST
-  let tokens = filter noComment g.sub.toks.toList
+  let tokens = filter noDocComment g.sub.toks.toList
   case tokens of
     [] -> return SourceType.ModuleSource
     (Token{tokid=PACKAGE}) : _ -> return SourceType.ModuleSource
@@ -368,7 +368,7 @@ scriptTypePass src = do
         then return SourceType.ExpressionSource
         else return SourceType.DefinitionsSource
 
-noComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
+noDocComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
@@ -561,7 +561,7 @@ getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
 
 iparsePass f = do
     g       <- getST
-    let tokens = (filter noComment g.sub.toks.toList)
+    let tokens = filter Token.noComment g.sub.toks.toList
     result <- Parse.pass tokens
     case result of
         Just (GUtil.Program.Module (packname, defs, doc)) -> do
@@ -589,7 +589,7 @@ expressionPass src = do
     if g.errors != 0
       then return false
       else do
-        let tokens = filter noComment g.sub.toks.toList
+        let tokens = filter noDocComment g.sub.toks.toList
         result <- Parse.pass tokens
         g <- getST
         return $ g.errors == 0
