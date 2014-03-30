@@ -204,10 +204,10 @@ interpret line = do
 browseModule :: String -> InterpreterApp (Maybe ([Symbol], Global))
 browseModule moduleName = do
   state <- Interpreter.get
-  let (syms, g) = StG.run (moduleSymbols moduleName) $ stdCompilerEnv state.classLoader
-  case syms of
-    [] -> return Nothing
-    _ -> return $ Just (syms, g)
+  (g, srcInfo) <- typecheck "\"\""
+  let syms = StG.run (browseSymbols moduleName) g
+  return $ maybe Nothing (const $ Just syms) srcInfo
+
 
 browse :: String -> InterpreterApp (Maybe ([Symbol], Global))
 browse src = do
@@ -235,8 +235,7 @@ javaSource line = do
 
 docHelp :: String -> InterpreterApp ([Message] | String)
 docHelp source = do
-   let fail = [Message.error (source ++ " cannot be resolved!")]
-       help g = maybe (Left fail) Right $ helpDoc source g
+   let help g = Right . unlines $ helpDoc source g
    (g, srcInfo) <- typecheck "\"\""
    return $ maybe (Left $ Message.fromGlobal g) (const $ help g) srcInfo
 
@@ -293,7 +292,8 @@ run src predefs steps = do
       then case scriptType of
                 ModuleSource -> return . Just $ SourceInfo.Module $ className g
                 DefinitionsSource -> return . Just $ SourceInfo.Definitions $ getSymbols g.thisTab
-                ExpressionSource -> return $ SourceInfo.Expression <$> fst (StG.run (resolveSymbol varName) g)
+                ExpressionSource -> return $ SourceInfo.Expression <$> listToMaybe sym where
+                  sym = fst $ StG.run (resolveSymbol varName) g
       else return Nothing
 
 {-
@@ -321,17 +321,25 @@ runpass (pass,description,post) = do
 
 derive Show Severity
 
-moduleSymbols :: String -> StG [Symbol]
-moduleSymbols pack = do
-        sw <-  doio $  StringWriter.new ()
-        p  <-  doio $  StringWriter.printer sw
-        changeST Global.{gen <- GenSt.{printer=p}, sub <- SubSt.{stderr=p}}
-        let p = Pack.new pack
+browseSymbols :: String -> StG [Symbol]
+browseSymbols s = do
+        let p = Pack.new $ magicPack s
         importClass Position.null p
         g <- getST
-        case g.packages.lookup p of
-            Nothing -> return []
-            Just env -> return $ getSymbols env
+        let resolveSName = do
+                            qNames <- sNameToQName (createSName s)
+                            let qNameSyms q = maybe [] getSymbols $ getEnv g q
+                            return $ qNames >>= qNameSyms
+            resolvePackage d p = maybe d (return . getSymbols) $ g.packages.lookup p
+            resolveNSPackage d = maybe d (resolvePackage d) $ g.namespaces.lookup (NSX s)
+        resolvePackage (resolveNSPackage resolveSName) p
+
+getEnv :: Global -> QName -> Maybe Symtab
+getEnv g q = q.findit g >>= symEnv
+  where
+    symEnv s
+      | s.{env?} = Just s.env
+      | otherwise = Nothing
 
 outlineSymbols :: Global -> [String]
 outlineSymbols g = map (EU.label g) $ EU.symbols g.thisTab
@@ -427,20 +435,19 @@ packDocumentationST pack = do
 sNameToQName sName = do
   g <- getST
   qNames <- U.resolve (VName g.thisPack) Position.null sName
-  return (listToMaybe qNames)  -- Just taking first resolved
+  return qNames
 
-helpDocST :: String -> StG (Maybe String)
 helpDocST source = do
   global <- getST
-  qNameMay <- sNameToQName (createSName source)
-  let symMay = qNameMay >>= (\qname -> qname.findit global)
-  maybe (return Nothing) (\sym -> symbolDocumentationST sym >>= return . Just) symMay
+  qNames <- sNameToQName (createSName source)
+  let syms = catMaybes $ (\qname -> qname.findit global) <$> qNames
+  sequence $ symbolDocumentationST <$> syms
 
-resolveSymbol :: String -> StG (Maybe Symbol)
+resolveSymbol :: String -> StG [Symbol]
 resolveSymbol source = do
                          global <- getST
-                         qNameMay <- sNameToQName (createSName source)
-                         return $ qNameMay >>= (\qname -> qname.findit global)
+                         qNames <- sNameToQName (createSName source)
+                         return . catMaybes $ (\q -> q.findit global) <$> qNames
 createSName s
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(\p{Lu}.*)$# = with2con ns ty id
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(.*)$#       = with2var ns ty id
