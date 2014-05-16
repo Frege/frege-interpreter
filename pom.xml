@@ -15,7 +15,7 @@
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <frege.version>3.21.440-gd7ba043</frege.version>
+    <frege.version>3.21.500-g88270a0</frege.version>
     <frege.plugin.version>1.0.5</frege.plugin.version>
     <ecj.version>4.2.2</ecj.version>
   </properties>

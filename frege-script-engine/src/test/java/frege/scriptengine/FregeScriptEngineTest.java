@@ -58,7 +58,7 @@ public class FregeScriptEngineTest {
     public void testCompilable() throws ScriptException {
         final Compilable compilableFrege = (Compilable) frege;
         final CompiledScript compiled =
-                compilableFrege.compile("fib = 0 : 1 : zipWith (+) fib fib.tail");
+                compilableFrege.compile("fib = 0 : 1 : zipWith (+) fib (tail fib)");
         compiled.eval();
         final Object actual = frege.eval("show $ take 6 fib");
         final Object expected = "[0, 1, 1, 2, 3, 5]";
