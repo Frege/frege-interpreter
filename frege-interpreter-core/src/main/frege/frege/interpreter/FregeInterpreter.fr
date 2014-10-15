@@ -191,14 +191,11 @@ interpret :: String ->  InterpreterApp InterpreterResult
 interpret line = do
   (tcGlobal, srcInfo) <- typecheck line
   case srcInfo of
-    Just sourceInfo ->
-      case sourceInfo of
-        Definitions syms -> return $ InterpreterResult.Success sourceInfo tcGlobal
-        _ -> do
-               (jsrc, g) <- javagen tcGlobal
-               let fail = InterpreterResult.Failure (Message.fromGlobal g)
-                   success = InterpreterResult.Success sourceInfo g
-               return $ maybe fail (const success) jsrc
+    Just sourceInfo -> do
+      (jsrc, g) <- javagen tcGlobal
+      let fail = InterpreterResult.Failure (Message.fromGlobal g)
+          success = InterpreterResult.Success sourceInfo g
+      return $ maybe fail (const success) jsrc
     Nothing -> return (InterpreterResult.Failure $ Message.fromGlobal tcGlobal)
 
 browseModule :: String -> InterpreterApp (Maybe ([Symbol], Global))
