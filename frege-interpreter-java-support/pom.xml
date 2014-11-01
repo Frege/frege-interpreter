@@ -58,7 +58,7 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-       <groupId>frege</groupId>
+       <groupId>com.theoryinpractise.frege</groupId>
         <artifactId>frege</artifactId>
     </dependency>
     <dependency>

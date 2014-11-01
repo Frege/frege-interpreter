@@ -90,7 +90,7 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
                     case 1: //Expression
                         final Data.TSymbol sym = toJavaValue(srcinfo._Expression().mem1);
                         final String className = toJavaValue(FregeInterpreter.symbolClass(sym, compilerState));
-                        final String varName = toJavaValue(FregeInterpreter.symbolVar(sym));
+                        final String varName = toJavaValue(FregeInterpreter.symbolVar(sym, compilerState));
                         res = evalSym(context, classLoader, className, varName);
                         break;
                     case 2: //Definitions

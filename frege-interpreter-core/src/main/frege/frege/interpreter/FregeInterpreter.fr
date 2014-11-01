@@ -8,16 +8,19 @@ import Compiler.Scanner hiding (main, is, interpret)
 import Compiler.Main(stdOptions, format,
   make, parsePass, postTrue, getOperators)
 import Compiler.GUtil as GUtil()
-import frege.compiler.types.Flags as Compilerflags(Flag, Flags)
+
+import Compiler.enums.Flags
+import Compiler.enums.TokenID(TokenID)
+
 import Lib.PP(TEXT)
+
 import Data.List
-import Data.Maybe
 import Java.IO()
 import Data.TreeMap (Tree, values)
-import Compiler.Nice (text, msgdoc)
-import Compiler.Classtools  as CT(FregePackage)
 import Compiler.Data hiding (Message, Severity)
 import Compiler.Data (Severity(), Message CompilerMessage)
+import Compiler.types.NSNames
+import Compiler.types.SNames
 import Compiler.Utilities   as U()
 import Compiler.Scanner     as Lex()
 import Compiler.Grammar     as Parse()
@@ -29,14 +32,18 @@ import Compiler.Transdef    as P5()
 import Compiler.Classes     as P6()
 import Compiler.Transform   as P7()
 import Compiler.Typecheck   as TC()
+
+import Compiler.types.Positions
+import Compiler.types.Tokens
+import Compiler.types.Packs
+import Compiler.types.QNames
+import Compiler.types.Types
+import Compiler.types.External(KindA, defEA)
+
 import Compiler.GenMeta     as GM()
-import Compiler.gen.Util    as GU()
 import Compiler.GenJava7    as G7()
-import Compiler.EclipseUtil as EU()
-import Compiler.DocUtils as DU(docit, docSym, DL, Doc, emitHtml)
+import Ide.Utilities        as EU()
 import Compiler.Import(getFP, importClass)
-import Java.Net
-import Data.Map as M()
 import Control.monad.Reader
 import Control.monad.State (evalState, execState)
 import Control.arrow.Kleisli
@@ -102,6 +109,8 @@ standardOptions classLoader = do
                 packageDoc = Nothing,
                 thisPos  = Position.null,
                 nsPos = Tree.empty,
+                packWhy = Tree.empty,
+                nsUsed = Tree.empty,
                 thisPack = Pack.new "",
                 numErrors  = 0,
                 resErrors = 0,
@@ -109,7 +118,7 @@ standardOptions classLoader = do
                 cancelled = return false,
                 nextPass = 1,
                 stderr = err,
-                toExport = []
+                toExport = [],
             },
             gen = Gen {
                 printer = out,
@@ -121,7 +130,7 @@ standardOptions classLoader = do
                 tTree = Tree.empty,
                 rTree = Tree.empty,
                 sTree = Tree.empty,
-                xTree = Tree.empty .insert GU.defEA 0,        -- so that 0 never indexes valid expression
+                xTree = Tree.empty .insert defEA 0,        -- so that 0 never indexes valid expression
                 kTree = Tree.empty .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
                 consts = Tree.empty,
                 lambdas = Tree.empty,
@@ -265,11 +274,15 @@ instance Show Message where
   show (Message pos INFO txt) = txt
   show (Message pos typ txt) = "[" ++ show typ ++ ": " ++ show pos ++ "]: " ++ txt
 
-symbolVar :: Symbol -> String
-symbolVar symbol = symbol.name.base
+symbolVar :: Symbol -> Global -> String
+symbolVar SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 1
+symbolVar SymL{alias, name} g = maybe (error $ "Not found: " ++ show name) (flip symbolVar g) $ g.find alias
+symbolVar symbol g = symbol.name.base
 
 symbolClass :: Symbol -> Global -> String
-symbolClass symbol g = show $ symbol.name.getpack.className g
+symbolClass SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 0
+symbolClass SymL{alias, name} g = maybe (error $ "Not found: " ++ show name) (flip symbolClass g) $ g.find alias
+symbolClass symbol g = g.unpack symbol.name.getpack
 
 
 {--
@@ -280,7 +293,7 @@ run src predefs steps = do
     g <- getST
     let scriptType = findScriptType src
         varName = findUnusedVariableName (predefs ++ src)
-        source = buildScript src scriptType predefs "frege.repl.Console" varName
+        source = buildScript src scriptType predefs "Console" varName
     changeST $ const g
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
     foreach (steps source) runpass
@@ -321,7 +334,7 @@ derive Show Severity
 browseSymbols :: String -> StG [Symbol]
 browseSymbols s = do
         let p = Pack.new $ magicPack s
-        importClass Position.null p
+        importClass Position.null p.nsName p
         g <- getST
         let resolveSName = do
                             qNames <- sNameToQName (createSName s)
@@ -332,7 +345,7 @@ browseSymbols s = do
         resolvePackage (resolveNSPackage resolveSName) p
 
 getEnv :: Global -> QName -> Maybe Symtab
-getEnv g q = q.findit g >>= symEnv
+getEnv g q = g.find q >>= symEnv
   where
     symEnv s
       | s.{env?} = Just s.env
@@ -343,7 +356,8 @@ outlineSymbols g = map (EU.label g) $ EU.symbols g.thisTab
 
 newLine = maybe "\n" id $ System.getProperty "line.separator"
 
-className global = show $ sub.thisPack.className global where sub = Global.sub global
+className :: Global -> String
+className global = global.unpack global.sub.thisPack
 
 data SourceType = ModuleSource | DefinitionsSource | ExpressionSource
 derive Show SourceType
@@ -351,6 +365,11 @@ derive Show SourceType
 data SourceInfo = Module String
                 | Expression Symbol
                 | Definitions [Symbol]
+
+instance Show SourceInfo where
+  show (Module packName) = "Module " ++ packName
+  show (Expression _) = "Expression"
+  show (Definitions _) = "Definitions"
 
 findScriptType :: String -> SourceType
 findScriptType src = fst $ StG.run f (interpreterCompilerEnv InterpreterClassLoader.default) where
@@ -392,42 +411,10 @@ findUnusedVariableName script = "res" ++ show unusedVarNum where
   loop m1 acc | Just m2 <- m1.find = loop m2 ((maybe 1 atoi $ m2.group 1) : acc)
               | otherwise = acc
 
-symDoc sym global = fst $ StG.run (symbolDocumentationST sym) global
-packageDoc pack global = fst $ StG.run (packDocumentationST pack) global
+symDoc sym global = fst $ State.run (EU.symbolDocumentation sym) global
+packageDoc pack global = fst $ StG.run (EU.packDocumentation (magicPack pack)) global
+
 helpDoc src global = fst $ StG.run (helpDocST src) global
-
-symbolDocumentationST :: Symbol -> StG String
-symbolDocumentationST sym = do
-    sw <-  doio $  StringWriter.new ()
-    p  <-  doio $  StringWriter.printer sw
-    changeST Global.{gen <- GenSt.{printer=p}}
-    g <- getST
-    let ds = docSym g sym
-        dl = DL (Just "func") [ds]
-        doc = Doc [dl]
-    emitHtml false doc      -- html without CSS, swing does not understand
-    doio $ g.printer.close
-    result <- doio $ sw.toString
-    return result
-
-packDocumentationST :: String -> StG (Maybe String)
-packDocumentationST pack = do
-    g <- getST
-    r <- getFP pack
-    case r of
-        Right (Just fp) -> case fp.doc of
-            ""   -> return . Just $ ("Undocumented package " ++ pack)
-            text -> do
-                let doc = Doc $ docit g (Just text)
-                sw <-  doio $  StringWriter.new ()
-                p  <-  doio $  StringWriter.printer sw
-                changeST Global.{gen <- GenSt.{printer=p}}
-                emitHtml false doc      -- html without CSS, swing does not understand
-                doio $ g.printer.close
-                result <- doio $ sw.toString
-                return . Just $ result
-        Left ex -> return Nothing
-        sonst   -> return . Just $ ("(java class?) " ++ pack)
 
 sNameToQName sName = do
   g <- getST
@@ -436,15 +423,19 @@ sNameToQName sName = do
 
 helpDocST source = do
   global <- getST
-  qNames <- sNameToQName (createSName source)
-  let syms = catMaybes $ (\qname -> qname.findit global) <$> qNames
-  sequence $ symbolDocumentationST <$> syms
+  let sName = createSName source
+  qNames <- sNameToQName sName
+  let syms = catMaybes $ global.find <$> qNames
+      symdocs = (\sym -> symDoc sym global) <$> syms
+      packdoc = packageDoc source global
+      doc = if (any (not . null) symdocs) then symdocs else [packdoc]
+  return doc
 
 resolveSymbol :: String -> StG [Symbol]
 resolveSymbol source = do
                          global <- getST
                          qNames <- sNameToQName (createSName source)
-                         return . catMaybes $ (\q -> q.findit global) <$> qNames
+                         return . catMaybes $ global.find <$> qNames
 createSName s
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(\p{Lu}.*)$# = with2con ns ty id
   | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(.*)$#       = with2var ns ty id
@@ -508,7 +499,7 @@ typecheckPasses (config :: InterpreterConfig) src = [
 javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
 javacPass compiler src = do
   g <- getST
-  let !packName = g.sub.thisPack.unpack g
+  let !packName = g.unpack g.sub.thisPack
   !jsrc <- doio $ src.toString
   res <- doio $ compiler.compile jsrc packName
   isSuccess <- doio $ res.isSuccess
@@ -535,7 +526,7 @@ getSymbolType :: Global -> Symbol -> String
 getSymbolType g SymI{typ} = EU.verbose g typ
 getSymbolType g SymV{typ} = EU.verbose g typ
 getSymbolType g SymD{typ} = EU.verbose g typ
-getSymbolType g SymL{alias} = maybe "" (getSymbolType g) $ alias.findit g
+getSymbolType g SymL{alias} = maybe "" (getSymbolType g) $ g.find alias
 getSymbolType g SymC{name,tau} = show tau.kind
 getSymbolType g SymT{name, nativ = Just n, pur, mutable}
     | pur       = "pure native " ++ n
@@ -612,17 +603,17 @@ isVariable g SymV{name,typ} = case typ.rho of
   RhoFun _ _ _ = false
   RhoTau ctx _ = ctx == []
 isVariable g SymD{} = true
-isVariable g SymL{alias} = maybe false (isVariable g) $ alias.findit g
+isVariable g SymL{alias} = maybe false (isVariable g) $ g.find alias
 isVariable _ _ = false
 
 isIO :: Global -> Symbol -> Bool
 isIO g SymV{typ} = "ST RealWorld" `isPrefix` nice typ g where
                       isPrefix = isPrefixOf `on` toList
-isIO g SymL{alias} = maybe false (isIO g) $ alias.findit g
+isIO g SymL{alias} = maybe false (isIO g) $ g.find alias
 isIO _ _ = false
 
 isString g SymV{typ} = nice typ g == "StringJ Char"
-isString g SymL{alias} = maybe false (isString g) $ alias.findit g
+isString g SymL{alias} = maybe false (isString g) $ g.find alias
 isString g _ = false
 
 -- Find the cause not more than 10 level deep
@@ -662,7 +653,8 @@ data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo 
 
 
 data Byte = pure native byte
-derive ArrayElement Byte
+instance PrimitiveArrayElement Byte where
+    native javaClass "byte.class" :: Class Byte
 
 type ByteArray = JArray Byte
 
@@ -690,3 +682,5 @@ pure native throwableCause getCause :: Throwable -> Maybe Throwable
 
 data Method = pure native java.lang.reflect.Method where
   pure native getName :: Method -> String
+
+pure native split :: String -> String -> JArray String

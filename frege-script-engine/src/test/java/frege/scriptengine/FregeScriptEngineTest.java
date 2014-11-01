@@ -74,4 +74,13 @@ public class FregeScriptEngineTest {
         final Object expected = "I am bar from foo";
         assertEquals(expected, actual);
     }
+
+    @Test
+    public void testUnpackagedModule() throws ScriptException {
+        frege.eval("module Bar where { bar = \"I am bar\"}");
+        frege.eval("pure native bar Bar.bar :: String");
+        final Object actual = frege.eval("bar");
+        final Object expected = "I am bar";
+        assertEquals(expected, actual);
+    }
 }

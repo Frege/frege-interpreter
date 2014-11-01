@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -40,10 +41,9 @@ public class InterpreterClassLoader extends URLClassLoader implements
     protected Class<?> findClass(final String className)
             throws ClassNotFoundException {
         final byte[] bytecode = classes.get(className);
-        if (bytecode != null) {
-            return defineClass(className, bytecode, 0, bytecode.length);
-        }
-        return super.findClass(className);
+        return (bytecode != null)
+               ? defineClass(className, bytecode, 0, bytecode.length)
+               : super.findClass(className);
     }
 
     @Override

@@ -153,6 +153,7 @@ public class MemoryJavaCompiler implements Cloneable, Serializable {
 
     private static Map<String, byte[]> classes(final CompilationResult result) {
       final Map<String, byte[]> classes = new HashMap<String, byte[]>();
+
       if (!result.hasErrors()) {
         for (final ClassFile cls : result.getClassFiles()) {
           final String className = CharOperation
