@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>frege</groupId>
+    <artifactId>frege-interpreter</artifactId>
+    <version>1.0.3-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>frege-interpreter-distribution</artifactId>
+
+  <packaging>pom</packaging>
+
+  <name>Frege Interpreter Distribution</name>
+
+  <!-- NOTE: These dependency declarations are only required to sort this project to the
+       end of the line in the multimodule build.
+
+       Since we only include the frege-script-engine module in our assembly, we only need to ensure this
+       distribution project builds AFTER that one...
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>frege</groupId>
+      <artifactId>frege-script-engine</artifactId>
+      <version>1.0.3-SNAPSHOT</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>distro-assembly</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <appendAssemblyId>false</appendAssemblyId>
+              <finalName>frege-interpreter-${project.version}</finalName>
+              <descriptors>
+                <descriptor>src/assemble/bin.xml</descriptor>
+              </descriptors>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
