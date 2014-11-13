@@ -387,10 +387,10 @@ scriptTypePass src = do
     [] -> return SourceType.ModuleSource
     (Token{tokid=PACKAGE}) : _ -> return SourceType.ModuleSource
     _ -> do
-      isExpr <- expressionPass src
-      if isExpr
-        then return SourceType.ExpressionSource
-        else return SourceType.DefinitionsSource
+      isDef <- isDefinition src
+      if isDef
+        then return SourceType.DefinitionsSource
+        else return SourceType.ExpressionSource
 
 noDocComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 
@@ -571,13 +571,12 @@ iparsePass f = do
 indent n src = (unlines . map (spaces ++) . lines $ src) where
   spaces = concat $ replicate n " "
 
-expressionPass :: String -> StG Bool
-expressionPass src = do
+isDefinition :: String -> StG Bool
+isDefinition src = do
     g       <- getST
     sw <- doio $ StringWriter.new ()
     pw <- doio $ sw.printer
-    let varDecl = variableDeclScript "f" src
-        modDecl = intercalate newLine ["module T where", varDecl]
+    let modDecl = intercalate newLine ["module T where", src]
     changeST Global.{sub <- SubSt.{stderr=pw}}
     runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
     g <- getST

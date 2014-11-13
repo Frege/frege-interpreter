@@ -39,6 +39,16 @@ public class FregeScriptEngineTest {
     }
 
     @Test
+    public void testInlineDefinitionWithTypeAnn() throws ScriptException {
+        frege.eval("type F = (forall b. [b] -> [b]) -> Int");
+        frege.eval("g :: F -> Int; g f = f reverse");
+        frege.eval("k2 (f :: [Int] -> [Int]) = 42");
+        final Object expected = frege.eval("g k2");
+        final Object actual = 42;
+        assertEquals(expected, actual);
+    }
+
+    @Test
     public void testBinding() throws ScriptException {
         frege.put("bar", new BigInteger("12312332142343244"));
         final Object actual = frege.eval("bar + 3.big");
