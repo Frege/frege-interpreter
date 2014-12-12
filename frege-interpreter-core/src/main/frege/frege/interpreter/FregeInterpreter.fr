@@ -290,11 +290,9 @@ symbolClass symbol g = g.unpack symbol.name.getpack
  * until one of them returns an error
  -}
 run src predefs steps = do
-    g <- getST
-    let scriptType = findScriptType src
+    let scriptType = findSourceType src predefs
         varName = findUnusedVariableName (predefs ++ src)
         source = buildScript src scriptType predefs "Console" varName
-    changeST $ const g
     changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
     foreach (steps source) runpass
     g <- getST
@@ -305,6 +303,35 @@ run src predefs steps = do
                 ExpressionSource -> return $ SourceInfo.Expression <$> listToMaybe sym where
                   sym = fst $ StG.run (resolveSymbol varName) g
       else return Nothing
+
+findSourceType :: String -> String -> SourceType
+findSourceType src predefs =
+  case calcSourceType src of
+    Just ModuleSource -> SourceType.ModuleSource
+    Just ExpressionSource -> SourceType.ExpressionSource
+    otherwise -> case calcSourceType (buildScript src SourceType.DefinitionsSource predefs "T" "") of
+                   Just ModuleSource -> SourceType.DefinitionsSource
+                   _ -> SourceType.ExpressionSource
+  where
+    calcSourceType src = fst $ StG.run (calculateSourceTypeST src) env
+    env = interpreterCompilerEnv InterpreterClassLoader.default
+
+calculateSourceTypeST :: String -> StG (Maybe SourceType)
+calculateSourceTypeST src = do
+    g       <- getST
+    pw <- doio $ StringWriter.new () >>= StringWriter.printer
+    changeST Global.{sub <- SubSt.{stderr=pw}}
+    runpass (lexPass src, "lexical analysis                      ", postTrue)
+    g <- getST
+    if g.errors != 0
+      then return Nothing
+      else do
+        let tokens = filter noDocComment g.sub.toks.toList
+        result <- Parse.pass tokens
+        case result of
+          Nothing -> return Nothing
+          Just (GUtil.Program.Module _) -> return (Just SourceType.ModuleSource)
+          _ -> return (Just SourceType.ExpressionSource)
 
 {-
 Compiler state with interpreter options
@@ -370,27 +397,6 @@ instance Show SourceInfo where
   show (Module packName) = "Module " ++ packName
   show (Expression _) = "Expression"
   show (Definitions _) = "Definitions"
-
-findScriptType :: String -> SourceType
-findScriptType src = fst $ StG.run f (interpreterCompilerEnv InterpreterClassLoader.default) where
-  f = do
-    runpass (lexPass src,         "lexical analysis                      ", postTrue)
-    g <- getST
-    if g.errors == 0
-      then scriptTypePass src
-      else return SourceType.ModuleSource
-
-scriptTypePass src = do
-  g <- getST
-  let tokens = filter noDocComment g.sub.toks.toList
-  case tokens of
-    [] -> return SourceType.ModuleSource
-    (Token{tokid=PACKAGE}) : _ -> return SourceType.ModuleSource
-    _ -> do
-      isDef <- isDefinition src
-      if isDef
-        then return SourceType.DefinitionsSource
-        else return SourceType.ExpressionSource
 
 noDocComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 
@@ -570,23 +576,6 @@ iparsePass f = do
 
 indent n src = (unlines . map (spaces ++) . lines $ src) where
   spaces = concat $ replicate n " "
-
-isDefinition :: String -> StG Bool
-isDefinition src = do
-    g       <- getST
-    sw <- doio $ StringWriter.new ()
-    pw <- doio $ sw.printer
-    let modDecl = intercalate newLine ["module T where", src]
-    changeST Global.{sub <- SubSt.{stderr=pw}}
-    runpass (lexPass modDecl, "lexical analysis                      ", postTrue)
-    g <- getST
-    if g.errors != 0
-      then return false
-      else do
-        let tokens = filter noDocComment g.sub.toks.toList
-        result <- Parse.pass tokens
-        g <- getST
-        return $ g.errors == 0
 
 lexPass src = do
     changeST Global.{sub <- SubSt.{toks = arrayFromList []}

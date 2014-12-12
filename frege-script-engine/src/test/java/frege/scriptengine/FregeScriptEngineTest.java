@@ -7,7 +7,11 @@ import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
+import org.junit.rules.TestWatcher;
+import org.junit.runner.Description;
 
 import java.math.BigInteger;
 
@@ -91,6 +95,31 @@ public class FregeScriptEngineTest {
         frege.eval("pure native bar Bar.bar :: String");
         final Object actual = frege.eval("bar");
         final Object expected = "I am bar";
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testOperators() throws ScriptException {
+        frege.eval("infix 1 `³`");
+        frege.eval("(x³) = x^3");
+        final Object expected = frege.eval("(2³)");
+        final Object actual = 8;
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testImportOperators() throws ScriptException {
+        frege.eval("import Data.Monoid");
+        frege.eval("import frege.data.wrapper.Num");
+        final Object expected = frege.eval("Sum.unwrap $ Sum 1 <> Sum 0");
+        final Object actual = 1;
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testTypeAnnotation() throws ScriptException {
+        final Object expected = frege.eval("(one :: Int)");
+        final Object actual = 1;
         assertEquals(expected, actual);
     }
 }
