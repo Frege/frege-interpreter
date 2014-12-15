@@ -118,8 +118,22 @@ public class FregeScriptEngineTest {
 
     @Test
     public void testTypeAnnotation() throws ScriptException {
-        final Object expected = frege.eval("(one :: Int)");
-        final Object actual = 1;
+        final Object expected = frege.eval("one + one :: Int");
+        final Object actual = 2;
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testWhere() throws ScriptException {
+        final Object expected = frege.eval("x + 3 where x = 5");
+        final Object actual = 8;
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testLet() throws ScriptException {
+        final Object expected = frege.eval("let x = 5 in x + 3");
+        final Object actual = 8;
         assertEquals(expected, actual);
     }
 }

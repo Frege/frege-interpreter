@@ -318,7 +318,6 @@ findSourceType src predefs =
 
 calculateSourceTypeST :: String -> StG (Maybe SourceType)
 calculateSourceTypeST src = do
-    g       <- getST
     pw <- doio $ StringWriter.new () >>= StringWriter.printer
     changeST Global.{sub <- SubSt.{stderr=pw}}
     runpass (lexPass src, "lexical analysis                      ", postTrue)
@@ -328,10 +327,13 @@ calculateSourceTypeST src = do
       else do
         let tokens = filter noDocComment g.sub.toks.toList
         result <- Parse.pass tokens
-        case result of
-          Nothing -> return Nothing
-          Just (GUtil.Program.Module _) -> return (Just SourceType.ModuleSource)
-          _ -> return (Just SourceType.ExpressionSource)
+        g <- getST
+        if g.errors != 0
+          then return Nothing
+          else case result of
+            Just (GUtil.Program.Module _) -> return (Just SourceType.ModuleSource)
+            Just (GUtil.Program.Expression _) -> return (Just SourceType.ExpressionSource)
+            _ -> return Nothing
 
 {-
 Compiler state with interpreter options
