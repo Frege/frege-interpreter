@@ -3,50 +3,54 @@
 -}
 module frege.interpreter.FregeInterpreter where
 
-import frege.Prelude hiding (Reader)
-import Compiler.Scanner hiding (main, is, interpret)
-import Compiler.Main(stdOptions, format,
-  make, parsePass, postTrue, getOperators)
-import Compiler.GUtil as GUtil()
+import  frege.Prelude hiding(<+>, Reader)
+import  Lib.PP(msgdoc, text, <+>)
+import  Control.monad.State
+import  Data.TreeMap(Tree, each, values, keys)
+import  Data.List (sort, uniq, intercalate, nubBy, groupBy, sortBy, isPrefixOf)
 
-import Compiler.enums.Flags
-import Compiler.enums.TokenID(TokenID)
-
-import Lib.PP(TEXT)
-
-import Data.List
-import Java.IO()
-import Data.TreeMap (Tree, values)
-import Compiler.Data hiding (Message, Severity)
-import Compiler.Data (Severity(), Message CompilerMessage)
-import Compiler.types.NSNames
-import Compiler.types.SNames
-import Compiler.Utilities   as U()
-import Compiler.Scanner     as Lex()
-import Compiler.Grammar     as Parse()
-import Compiler.Fixdefs     as P1()
-import Compiler.Import      as P2()
-import Compiler.Enter       as P3()
-import Compiler.TAlias      as P4()
-import Compiler.Transdef    as P5()
-import Compiler.Classes     as P6()
-import Compiler.Transform   as P7()
-import Compiler.Typecheck   as TC()
-
-import Compiler.types.Positions
-import Compiler.types.Tokens
-import Compiler.types.Packs
-import Compiler.types.QNames
+import  Compiler.enums.Flags
+import  Compiler.types.Global hiding (Message, Severity)
+import Compiler.types.Global (Message CompilerMessage, Severity())
+import  Compiler.common.Desugar hiding (Program)
+import  Compiler.common.Desugar (Program (Module ModuleProgram, Expression ExpressionProgram))
+import  Compiler.types.SourceDefinitions
+import  Compiler.common.CompilerOptions (standardGlobal, stdOptions, getOpts, theClassLoader, pathSep, ourPath)
+import  Compiler.common.Errors as E()
+import  Compiler.types.Tokens
+import  Compiler.enums.TokenID
+import  Compiler.types.Packs
+import  Compiler.types.Positions
+import  Compiler.types.Symbols
+import  Compiler.types.External(KindA, defEA)
+import  Compiler.types.NSNames
+import  Compiler.types.QNames
+import  Compiler.types.SNames
 import Compiler.types.Types
-import Compiler.types.External(KindA, defEA)
+import Compiler.passes.Imp (importClass)
+import  Compiler.classes.Nice(Nice, category)
+import  Compiler.common.Errors as E()
+import  Compiler.common.Resolve as R
 
-import Compiler.GenMeta     as GM()
-import Compiler.GenJava7    as G7()
-import Ide.Utilities        as EU()
-import Compiler.Import(getFP, importClass)
+import  Compiler.grammar.Lexer as L()
+import  Compiler.grammar.Frege as F()
+import  Compiler.passes.Fix()
+import  Compiler.passes.Imp()
+import  Compiler.passes.Enter()
+import  Compiler.passes.Fields()
+import  Compiler.passes.TypeAlias()
+import  Compiler.passes.Instances()
+import  Compiler.passes.Transdef()
+import  Compiler.Classes()
+import  Compiler.Typecheck as TC()
+import  Compiler.Transform as TF()
+import  Compiler.GenMeta   as GM()
+import  Compiler.GenJava7  as G7()
+
 import Control.monad.Reader
-import Control.monad.State (evalState, execState)
 import Control.arrow.Kleisli
+
+import Ide.Utilities as Util
 
 data Interpreter config st a = Interpreter {
     unInterpreter :: ReaderT (State st) config a
@@ -70,7 +74,7 @@ instance Monad (Interpreter config st) where
 
 data InterpreterConfig = InterpreterConfig {
     predefs :: [String],
-    transformDefs :: [Definition] -> StG [Definition]
+    transformDefs :: [DefinitionS] -> StG [DefinitionS]
   } where
 
   default = InterpreterConfig {
@@ -89,7 +93,8 @@ type InterpreterApp = Interpreter InterpreterConfig InterpreterState
 createopts sp flags dir path prefix source = stdOptions.{
                                 source = source,
                                 sourcePath = sp,
-                                flags, dir,
+                                flags,
+                                dir,
                                 path = path,
                                 prefix}
 
@@ -105,7 +110,7 @@ standardOptions classLoader = do
                 optab = Tree.empty,
                 toks = arrayFromList [],
                 idKind = Tree.empty,
-                definitions = [],
+                sourcedefs = [],
                 packageDoc = Nothing,
                 thisPos  = Position.null,
                 nsPos = Tree.empty,
@@ -119,6 +124,7 @@ standardOptions classLoader = do
                 nextPass = 1,
                 stderr = err,
                 toExport = [],
+                funPointers = empty,
             },
             gen = Gen {
                 printer = out,
@@ -132,6 +138,7 @@ standardOptions classLoader = do
                 sTree = Tree.empty,
                 xTree = Tree.empty .insert defEA 0,        -- so that 0 never indexes valid expression
                 kTree = Tree.empty .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
+                expSym = Tree.empty,
                 consts = Tree.empty,
                 lambdas = Tree.empty,
                 syminfo = Tree.empty,
@@ -157,34 +164,34 @@ javaSourceGen :: Global -> InterpreterApp (Maybe String, Global)
 javaSourceGen global = do
   state <- Interpreter.get
   let javagenST = do
-                    javaSourceWriter <- doio $ StringWriter.new () -- Java source will be written here
+                    javaSourceWriter <- liftIO $ StringWriter.new () -- Java source will be written here
                     let steps = javaSourcePasses javaSourceWriter
-                    foreach steps runpass
-                    global <- getST
+                    forsome steps runpass
+                    global <- getSTT
                     if global.errors == 0
                         then do
-                           javaSource <- doio $ javaSourceWriter.toString
+                           javaSource <- liftIO $ javaSourceWriter.toString
                            return (Just javaSource)
                         else return Nothing
-  return $ StG.run javagenST global
+  return $ IO.performUnsafe $ StateT.run javagenST global
 
 javagen :: Global -> InterpreterApp (Maybe String, Global)
 javagen global = do
   state <- Interpreter.get
-  let javagenST = do
-                    javaSourceWriter <- doio $ StringWriter.new () -- Java source will be written here
-                    classLoader <- doio $ Mutable.thaw state.classLoader
-                    javac <- doio $ MemoryJavaCompiler.new classLoader
+  let javagenSTT = do
+                    javaSourceWriter <- liftIO $ StringWriter.new () -- Java source will be written here
+                    classLoader <- liftIO $ Mutable.thaw state.classLoader
+                    javac <- liftIO $ MemoryJavaCompiler.new classLoader
                     let steps = javagenPasses javaSourceWriter javac
-                    foreach steps runpass
-                    global <- getST
+                    forsome steps runpass
+                    global <- getSTT
                     if global.errors == 0
                         then do
-                           classLoader <- doio $ javac.classLoader >>= Mutable.freeze
-                           javaSource <- doio $ javaSourceWriter.toString
+                           classLoader <- liftIO $ javac.classLoader >>= Mutable.freeze
+                           javaSource <- liftIO $ javaSourceWriter.toString
                            return (classLoader, Just javaSource)
                         else return (state.classLoader, Nothing)
-  let ((loader, jsrc), g) = StG.run javagenST global
+  let ((loader, jsrc), g) = IO.performUnsafe $ StateT.run javagenSTT global
   Interpreter.put $ InterpreterState loader
   return (jsrc, g)
 
@@ -193,7 +200,7 @@ typecheck src = do
   config <- Interpreter.ask
   state <- Interpreter.get
   let predefsSrc = intercalate newLine $ reverse config.predefs
-      (sourceType, global) = StG.run (run src predefsSrc (typecheckPasses config)) (interpreterCompilerEnv state.classLoader)
+      (sourceType, global) = IO.performUnsafe $ StateT.run (run src predefsSrc (typecheckPasses config)) (interpreterCompilerEnv state.classLoader)
   return (global, sourceType)
 
 interpret :: String ->  InterpreterApp InterpreterResult
@@ -211,7 +218,7 @@ browseModule :: String -> InterpreterApp (Maybe ([Symbol], Global))
 browseModule moduleName = do
   state <- Interpreter.get
   (g, srcInfo) <- typecheck "\"\""
-  let syms = StG.run (browseSymbols moduleName) g
+  let syms = IO.performUnsafe $ StateT.run (browseSymbols moduleName) g
   return $ maybe Nothing (const $ Just syms) srcInfo
 
 
@@ -245,7 +252,7 @@ docHelp source = do
    (g, srcInfo) <- typecheck "\"\""
    return $ maybe (Left $ Message.fromGlobal g) (const $ help g) srcInfo
 
-removeDuplicateDefs :: [Definition] -> StG [Definition]
+removeDuplicateDefs :: [DefinitionS] -> StG [DefinitionS]
 removeDuplicateDefs defs = do
   let ds = nubBy matching $ reverse defs
       fm (x:xs) (y:ys) = funcMatching x y
@@ -293,9 +300,9 @@ run src predefs steps = do
     let scriptType = findSourceType src predefs
         varName = findUnusedVariableName (predefs ++ src)
         source = buildScript src scriptType predefs "Console" varName
-    changeST Global.{gen <- GenSt.{printer=IO.stdout}}    -- just to have no undefined value there
-    foreach (steps source) runpass
-    g <- getST
+    changeSTT Global.{gen <- GenSt.{printer = stdout}}    -- just to have no undefined value there
+    forsome (steps source) runpass
+    g <- getSTT
     if g.errors == 0
       then case scriptType of
                 ModuleSource -> return . Just $ SourceInfo.Module $ className g
@@ -313,26 +320,25 @@ findSourceType src predefs =
                    Just ModuleSource -> SourceType.DefinitionsSource
                    _ -> SourceType.ExpressionSource
   where
-    calcSourceType src = fst $ StG.run (calculateSourceTypeST src) env
+    calcSourceType src = fst $ IO.performUnsafe $ StateT.run (calculateSourceTypeST src) env
     env = interpreterCompilerEnv InterpreterClassLoader.default
 
-calculateSourceTypeST :: String -> StG (Maybe SourceType)
+calculateSourceTypeST :: String -> StIO (Maybe SourceType)
 calculateSourceTypeST src = do
-    pw <- doio $ StringWriter.new () >>= StringWriter.printer
-    changeST Global.{sub <- SubSt.{stderr=pw}}
-    runpass (lexPass src, "lexical analysis                      ", postTrue)
-    g <- getST
+    pw <- liftIO $ StringWriter.new () >>= StringWriter.printer
+    changeSTT Global.{sub <- SubSt.{stderr=pw}}
+    runpass (lexPass src, "lexical analysis")
+    g <- getSTT
     if g.errors != 0
       then return Nothing
       else do
-        let tokens = filter noDocComment g.sub.toks.toList
-        result <- Parse.pass tokens
-        g <- getST
+        result <- liftStG $ F.pass (filter Token.noComment g.sub.toks.toList)
+        g <- getSTT
         if g.errors != 0
           then return Nothing
           else case result of
-            Just (GUtil.Program.Module _) -> return (Just SourceType.ModuleSource)
-            Just (GUtil.Program.Expression _) -> return (Just SourceType.ExpressionSource)
+            Just (ModuleProgram _) -> return (Just SourceType.ModuleSource)
+            Just (ExpressionProgram _) -> return (Just SourceType.ExpressionSource)
             _ -> return Nothing
 
 {-
@@ -342,31 +348,23 @@ There is no IO; The classes are loaded in memory.
 interpreterCompilerEnv loader = IO.performUnsafe $ do
   g <- standardOptions loader
   let opts = createopts ["."] flags "." [] "" "<console>.fr"
-      flags = Flags.fromList [WARNINGS, HINTS, IDE]
+      flags = Flags.fromList [WARNINGS, HINTS]
   return g.{options = opts}
 
 stdCompilerEnv loader = IO.performUnsafe $ standardOptions loader
 
-runpass (pass,description,post) = do
-    state <- getST
-    when (state.errors == 0) do
-        (itemnm, items) <- pass
-        state <- getST
-        postconditionHolds <- if state.errors == 0 then post else stio true
-        unless (postconditionHolds) do
-            doio (state.stderr.println "FATAL: post condition violated")
-            changeST Global.{sub <- SubSt.{numErrors <- (1+)}}
-        stio ()
+runpass :: (StIO (String, Int), String) -> StIO  ()
+runpass (pass,description) = do
+    state <- getSTT
+    when (state.errors == 0) (pass >> return ())
 
-derive Show Severity
-
-browseSymbols :: String -> StG [Symbol]
+browseSymbols :: String -> StIO [Symbol]
 browseSymbols s = do
         let p = Pack.new $ magicPack s
         importClass Position.null p.nsName p
-        g <- getST
+        g <- getSTT
         let resolveSName = do
-                            qNames <- sNameToQName (createSName s)
+                            qNames <- liftStG $ sNameToQName (createSName s)
                             let qNameSyms q = maybe [] getSymbols $ getEnv g q
                             return $ qNames >>= qNameSyms
             resolvePackage d p = maybe d (return . getSymbols) $ g.packages.lookup p
@@ -381,7 +379,7 @@ getEnv g q = g.find q >>= symEnv
       | otherwise = Nothing
 
 outlineSymbols :: Global -> [String]
-outlineSymbols g = map (EU.label g) $ EU.symbols g.thisTab
+outlineSymbols g = map (Util.label g) $ Util.symbols g.thisTab
 
 newLine = maybe "\n" id $ System.getProperty "line.separator"
 
@@ -414,19 +412,19 @@ buildScript script SourceType.ModuleSource predefs _ _ = script
 findUnusedVariableName script = "res" ++ show unusedVarNum where
   unusedVarNum = maybe 1 id . listToMaybe $ dropWhile (flip elem used) [1..]
   used = reverse $ loop m []
-  m = #res(\d+)#.matcher script
+  m = 'res(\d+)'.matcher script
   loop :: Matcher -> [Int] -> [Int]
   loop m1 acc | Just m2 <- m1.find = loop m2 ((maybe 1 atoi $ m2.group 1) : acc)
               | otherwise = acc
 
-symDoc sym global = fst $ State.run (EU.symbolDocumentation sym) global
-packageDoc pack global = fst $ StG.run (EU.packDocumentation (magicPack pack)) global
+symDoc sym global = IO.performUnsafe $ fmap fst $ (Util.symbolDocumentation sym).run global
+packageDoc pack global = IO.performUnsafe $ fmap fst $ (Util.packDocumentation (magicPack pack)).run global
 
 helpDoc src global = fst $ StG.run (helpDocST src) global
 
 sNameToQName sName = do
   g <- getST
-  qNames <- U.resolve (VName g.thisPack) Position.null sName
+  qNames <- R.resolve (VName g.thisPack) Position.null sName
   return qNames
 
 helpDocST source = do
@@ -445,11 +443,11 @@ resolveSymbol source = do
                          qNames <- sNameToQName (createSName source)
                          return . catMaybes $ global.find <$> qNames
 createSName s
-  | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(\p{Lu}.*)$# = with2con ns ty id
-  | Just (Just ns : Just ty : Just id : _) <- s `match` #^(.*)\.(.*)\.(.*)$#       = with2var ns ty id
-  | Just (Just ty : Just id : _)           <- s `match` #^(.*)\.(\p{Lu}.*)$#       = with1con ty id
-  | Just (Just ty : Just id : _)           <- s `match` #^(.*)\.(.*)$#             = with1var ty id
-  | s ~ #^\p{Lu}.*$#                                                               = Simple (Token CONID s 1 0 0 [])
+  | Just (Just ns : Just ty : Just id : _) <- s `match` '^(.*)\.(.*)\.(\p{Lu}.*)$' = with2con ns ty id
+  | Just (Just ns : Just ty : Just id : _) <- s `match` '^(.*)\.(.*)\.(.*)$'       = with2var ns ty id
+  | Just (Just ty : Just id : _)           <- s `match` '^(.*)\.(\p{Lu}.*)$'       = with1con ty id
+  | Just (Just ty : Just id : _)           <- s `match` '^(.*)\.(.*)$'             = with1var ty id
+  | s ~ '^\p{Lu}.*$'                                                               = Simple (Token CONID s 1 0 0 [])
   | otherwise                                                                      = Simple (Token VARID s 1 0 0 [])
      where with2con ns ty id = With2 (qual ns) (qual ty) (con id)
            with2var ns ty id = With2 (qual ns) (qual ty) (var id)
@@ -466,55 +464,52 @@ buildShowScript varName state symbol
   | otherwise         = "packed . take 80 . showChars $ " ++ varName
 
 openPrinter pw = do
-    g <- getST
-    printer <- doio $ StringWriter.printer pw
-    changeST Global.{gen <- GenSt.{printer=printer}}
-    stio ("file", 1)
+    g <- getSTT
+    printer <- liftIO $ StringWriter.printer pw
+    changeSTT Global.{gen <- GenSt.{printer=printer}}
+    return ("file", 1)
 
 javaSourcePasses jw = [
-    -- function       description                            post condition
-    (P7.pass9,        "simplify expressions                  ", P7.post),   -- TRACE9
-    (P7.pass8,        "globalize anonymous lambdas           ", P7.post),   -- TRACE8
-    (P7.pass10,       "strictness analysis                   ", P7.post),   -- TRACES
-    (openPrinter jw,     "open file                             ", postTrue),
-    (GM.pass,         "generate meta data                    ", GM.post),   -- none
-    (G7.pass,         "generate java code                    ", G7.post)  -- TRACEG
+    (liftStG TF.pass9,          "simplify expressions"),            -- TRACE9
+    (liftStG TF.pass8,          "globalize anonymous lambdas"),     -- TRACE8
+    (liftStG TF.pass10,         "strictness analysis"),             -- TRACES
+    (openPrinter jw,     "open file"),
+    (GM.genmeta,      "generate meta data"),   -- none
+    (G7.pass,         "generate java7 code")  -- TRACEG
     ]
 
 javagenPasses jw javac = javaSourcePasses jw ++ [
-    -- function       description                            post condition
-    (javacPass javac jw,           "run java compiler                     ", postTrue)
+    (javacPass javac jw, "run java compiler")
     ]
 
 typecheckPasses (config :: InterpreterConfig) src = [
-  -- function       description                            post condition
-  (lexPass src,         "lexical analysis                      ", postTrue),
-  (iparsePass config.transformDefs,      "syntax  analysis                      ", postTrue),
-  (P1.pass,         "collecting definitions                ", P1.post),
-  (P2.pass,         "symbol table initialization and import", P2.post),
-  (P6.passI true,   "verify imported instances             ", P6.post),
-  (P3.pass,         "enter definitions                     ", P3.post),
-  (P4.pass,         "check type aliases                    ", P4.post),
-  (P3.pass2,        "make field definitions                ", P3.post),
-  (P3.pass3,        "enter (derived) instances             ", P3.post),
-  (P5.pass,         "translate names in exprs and types    ", P5.post),
-  (P6.passC,        "verify class definitions              ", P6.post),   -- TRACE6
-  (P6.passI false,  "verify own instances                  ", P6.post),   -- TRACE6
-  (P7.pass7,        "simplify lets                         ", P7.post),   -- TRACE7
-  (TC.pass,         "type check                            ", TC.post)   -- TRACET, TRACEO
+   (lexPass src, "lexer"),
+   (liftStG (iparsePass config.transformDefs), "parser"),
+   (liftStG Fix.pass, "join definitions"),
+   (Imp.pass, "import packages"),
+   (liftStG (Classes.passI true), "verify imported instances"),
+   (liftStG Enter.pass, "enter definitions"),
+   (liftStG Fields.pass, "field definitions"),
+   (liftStG TypeAlias.pass, "process type aliases"),
+   (liftStG Instances.pass, "derive and enter instances"),
+   (Transdef.pass, "resolve names"),
+   (liftStG Classes.passC,          "verify class definitions"),        -- TRACE6
+   (liftStG $ Classes.passI false,  "verify own instances"),            -- TRACE6
+   (liftStG TF.pass7,          "simplify lets"),                   -- TRACE7
+   (TC.pass,                   "type check"),                      -- TRACET, TRACEO
   ]
 
-javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StG (String, Int)
+javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StIO (String, Int)
 javacPass compiler src = do
-  g <- getST
+  g <- getSTT
   let !packName = g.unpack g.sub.thisPack
-  !jsrc <- doio $ src.toString
-  res <- doio $ compiler.compile jsrc packName
-  isSuccess <- doio $ res.isSuccess
+  !jsrc <- liftIO $ src.toString
+  res <- liftIO $ compiler.compile jsrc packName
+  isSuccess <- liftIO $ res.isSuccess
   if !isSuccess
     then do
-            msg <- doio $ res.errorsAsString
-            U.error Position.null (TEXT msg)
+            msg <- liftIO $ res.errorsAsString
+            liftStG $ E.error Position.null (text msg)
             return ("javac", 1)
     else
       return ("javac", 0)
@@ -527,13 +522,12 @@ matching (_@DatDcl{name=x}) (_@DatDcl{name=y}) = x == y
 matching (_@JavDcl{name=x}) (_@JavDcl{name=y}) = x == y
 matching _ _ = false
 
-funcMatching (_@FunDcl{name=x}) (_@FunDcl{name=y}) = x == y
-funcMatching _ _ = false
+funcMatching d1 d2 = maybe false id $ (==) <$> funbinding d1 <*> funbinding d2
 
 getSymbolType :: Global -> Symbol -> String
-getSymbolType g SymI{typ} = EU.verbose g typ
-getSymbolType g SymV{typ} = EU.verbose g typ
-getSymbolType g SymD{typ} = EU.verbose g typ
+getSymbolType g SymI{typ} = Util.verbose g typ
+getSymbolType g SymV{typ} = Util.verbose g typ
+getSymbolType g SymD{typ} = Util.verbose g typ
 getSymbolType g SymL{alias} = maybe "" (getSymbolType g) $ g.find alias
 getSymbolType g SymC{name,tau} = show tau.kind
 getSymbolType g SymT{name, nativ = Just n, pur, mutable}
@@ -545,7 +539,7 @@ getSymbolType g sym
     | otherwise        = ""
 
 showSymbol :: Global -> Symbol -> String
-showSymbol g sym = sym.category g ++ " " ++ EU.label g sym
+showSymbol g sym = category sym g ++ " " ++ Util.label g sym
 
 getSymbols :: Symtab -> [Symbol]
 getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
@@ -564,13 +558,12 @@ getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
 
 iparsePass f = do
     g       <- getST
-    let tokens = filter Token.noComment g.sub.toks.toList
-    result <- Parse.pass tokens
+    result <- F.pass (filter Token.noComment g.sub.toks.toList)
     case result of
-        Just (GUtil.Program.Module (packname, defs, doc)) -> do
+        Just (ModuleProgram (packname, defs, doc)) -> do
             changeST Global.{sub <-  SubSt.{thisPack = Pack.new packname}}
             newDefs <- f defs
-            changeST Global.{sub <- (SubSt.{definitions = newDefs }
+            changeST Global.{sub <- (SubSt.{sourcedefs = newDefs }
                                      • SubSt.{packageDoc = Nothing})}
             stio ("tokens",  g.sub.toks.length)
         Just _ -> error "FATAL: Expected module"
@@ -580,13 +573,13 @@ indent n src = (unlines . map (spaces ++) . lines $ src) where
   spaces = concat $ replicate n " "
 
 lexPass src = do
-    changeST Global.{sub <- SubSt.{toks = arrayFromList []}
-                            . SubSt.{definitions = []}
+    changeSTT Global.{sub <- SubSt.{toks = arrayFromList []}
+                            . SubSt.{sourcedefs = []}
                             . SubSt.{packageDoc  = Nothing}
                             . SubSt.{thisPack    = Pack.new ""}}
-    changeST Global.{locals = Tree.empty, typEnv = []}
-    tokens <- Lex.passCS (CharSeq.fromString src) getOperators
-    stio ("tokens", length tokens)
+    changeSTT Global.{locals = Tree.empty, typEnv = []}
+    tokens <- liftStG $ L.passCS (L.CharSeq.fromString src)
+    return ("tokens", length tokens)
 
 isVariable :: Global -> Symbol -> Bool
 isVariable g SymV{name,typ} = case typ.rho of
@@ -642,7 +635,6 @@ data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo 
   native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArray)
 
 
-data Byte = pure native byte
 instance PrimitiveArrayElement Byte where
     native javaClass "byte.class" :: Class Byte
 
@@ -663,6 +655,9 @@ native fieldValue frege.interpreter.javasupport.JavaUtils.fieldValue ::
   String -> String -> InterpreterClassLoader -> ST s (Maybe a)
 
 native sandboxFieldValue frege.interpreter.javasupport.JavaUtils.sandboxFieldValue ::
+  String -> String -> String -> StringWriter -> StringWriter -> InterpreterClassLoader -> IO (Maybe a)
+
+native fieldValueWithRuntime frege.interpreter.javasupport.JavaUtils.fieldValueWithRuntime ::
   String -> String -> String -> StringWriter -> StringWriter -> InterpreterClassLoader -> IO (Maybe a)
 
 pure native longToString Long.toString :: Long -> Int -> String

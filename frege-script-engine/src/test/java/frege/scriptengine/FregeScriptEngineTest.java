@@ -43,6 +43,17 @@ public class FregeScriptEngineTest {
     }
 
     @Test
+    public void testDefinitionWithTypeAnn() throws ScriptException {
+        frege.eval("f :: Int -> Int -> Int\n" +
+                   "f x y = x + y");
+        frege.eval("g :: Int -> Int -> Int\n" +
+                   "g x y = x + y");
+        final Object actual = frege.eval("f 3 4");
+        final Object expected = 7;
+        assertEquals(expected, actual);
+    }
+
+    @Test
     public void testInlineDefinitionWithTypeAnn() throws ScriptException {
         frege.eval("type F = (forall b. [b] -> [b]) -> Int");
         frege.eval("g :: F -> Int; g f = f reverse");
@@ -72,7 +83,7 @@ public class FregeScriptEngineTest {
     public void testCompilable() throws ScriptException {
         final Compilable compilableFrege = (Compilable) frege;
         final CompiledScript compiled =
-                compilableFrege.compile("fib = 0 : 1 : zipWith (+) fib (tail fib)");
+            compilableFrege.compile("fib = 0 : 1 : zipWith (+) fib (tail fib)");
         compiled.eval();
         final Object actual = frege.eval("show $ take 6 fib");
         final Object expected = "[0, 1, 1, 2, 3, 5]";
@@ -86,6 +97,21 @@ public class FregeScriptEngineTest {
         frege.eval("baz = bar");
         final Object actual = frege.eval("baz");
         final Object expected = "I am bar from foo";
+        assertEquals(expected, actual);
+    }
+
+
+    @Test
+    public void testModuleWithComment() throws ScriptException {
+        frege.eval("module foo.Foo where\n" +
+            "\n" +
+            "{--asdfasdf\n" +
+            "sadfasdfsadf-}\n" +
+            "\n" +
+            "baz = \"I am foo!\"");
+        frege.eval("import foo.Foo");
+        final Object actual = frege.eval("baz");
+        final Object expected = "I am foo!";
         assertEquals(expected, actual);
     }
 

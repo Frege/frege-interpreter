@@ -17,22 +17,14 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>com.theoryinpractise.frege</groupId>
-                <artifactId>frege-maven-plugin</artifactId>
-                <version>${frege.plugin.version}</version>
-                <executions>
-                    <execution>
-                        <id>compile</id>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
+                <groupId>io.repaint.maven</groupId>
+                <artifactId>tiles-maven-plugin</artifactId>
+                <version>2.1</version>
+                <extensions>true</extensions>
                 <configuration>
-                    <inline>true</inline>
-                    <hints>true</hints>
-                    <includeStale>false</includeStale>
+                    <tiles>
+                        <tile>com.theoryinpractise.frege:frege-maven-tile:xml:1.0.2</tile>
+                    </tiles>
                 </configuration>
             </plugin>
         </plugins>
@@ -53,9 +45,9 @@
             <artifactId>ecj</artifactId>
         </dependency>
         <dependency>
-            <groupId>${project.groupId}</groupId>
+            <groupId>frege</groupId>
             <artifactId>frege-interpreter-java-support</artifactId>
-            <version>${project.version}</version>
+            <version>1.0.3-SNAPSHOT</version>
         </dependency>
     </dependencies>
 </project>

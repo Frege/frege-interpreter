@@ -1,6 +1,8 @@
 package frege.scriptengine;
 
-import frege.compiler.Data;
+import frege.Prelude;
+import frege.compiler.types.Global;
+import frege.compiler.types.Symbols;
 import frege.interpreter.FregeInterpreter;
 import frege.interpreter.FregeInterpreter.TInterpreterResult;
 import frege.interpreter.javasupport.InterpreterClassLoader;
@@ -8,6 +10,8 @@ import frege.interpreter.javasupport.JavaUtils;
 import frege.interpreter.javasupport.Ref;
 import frege.prelude.PreludeBase;
 import frege.prelude.PreludeBase.TList;
+import frege.prelude.PreludeMonad;
+import frege.prelude.PreludeText;
 import frege.runtime.Lambda;
 import frege.runtime.Lazy;
 
@@ -21,6 +25,8 @@ import javax.script.ScriptEngineFactory;
 import javax.script.ScriptException;
 import javax.script.SimpleBindings;
 import java.io.Reader;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
@@ -38,9 +44,9 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
 
     private static String preludeDef = "module "
         + PRELUDE_SCRIPT_CLASS_NAME + " where\n"
-        + "data Ref a = pure native " + Ref.class.getCanonicalName() + " where\n"
-        + "  native new :: () -> ST s (Ref a)\n"
-        + "  pure native get :: Ref a -> a\n";
+        + "data FregeScriptEngineRef a = pure native " + Ref.class.getCanonicalName() + " where\n"
+        + "  native new :: () -> ST s (FregeScriptEngineRef a)\n"
+        + "  pure native get :: FregeScriptEngineRef a -> a\n";
 
     public FregeScriptEngine(final ScriptEngineFactory factory) {
         this.factory = factory;
@@ -82,13 +88,13 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
             case 0: //Success
                 TInterpreterResult.DSuccess success = interpRes._Success();
                 final FregeInterpreter.TSourceInfo srcinfo = toJavaValue(success.mem$sourceRepr);
-                final Data.TGlobal compilerState = toJavaValue(success.mem$compilerState);
+                final Global.TGlobal compilerState = toJavaValue(success.mem$compilerState);
                 switch (srcinfo._constructor()) {
                     case 0: //Module
                         context.setAttribute(CLASSLOADER_KEY, classLoader, ScriptContext.ENGINE_SCOPE);
                         break;
                     case 1: //Expression
-                        final Data.TSymbol sym = toJavaValue(srcinfo._Expression().mem1);
+                        final Symbols.TSymbolT sym = toJavaValue(srcinfo._Expression().mem1);
                         final String className = toJavaValue(FregeInterpreter.symbolClass(sym, compilerState));
                         final String varName = toJavaValue(FregeInterpreter.symbolVar(sym, compilerState));
                         res = evalSym(context, classLoader, className, varName);
@@ -228,11 +234,11 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
         final Object bindings = context.getAttribute(FREGE_BINDINGS_KEY, ScriptContext.ENGINE_SCOPE);
         final boolean includePreludeImport = bindings == null;
         final String newScript = String.format(
-            "\n%1$s :: %2$s\n%1$s = Ref.get %3$s", name, type, name + "Ref");
+            "\n%1$s :: %2$s\n%1$s = FregeScriptEngineRef.get %3$s", name, type, name + "Ref");
         final TList predefs;
         if (includePreludeImport) {
             final String preludeImport = "\nimport " + PRELUDE_SCRIPT_CLASS_NAME + "\n";
-            predefs = TList.DCons.mk(preludeImport, TList.DCons.mk(newScript, config.mem$predefs));
+            predefs = TList.DCons.mk(newScript, TList.DCons.mk(preludeImport, config.mem$predefs));
 
         } else {
             predefs = TList.DCons.mk(newScript, config.mem$predefs);
@@ -243,9 +249,9 @@ public class FregeScriptEngine extends AbstractScriptEngine implements
     }
 
     private void updatePreludeScript(final String name, final String type) {
-        final String typ = "Ref (" + type + ")";
+        final String typ = "FregeScriptEngineRef (" + type + ")";
         final String newDef = String.format("\n%1$sRef :: %2$s\n"
-            + "!%1$sRef = IO.performUnsafe $ Ref.new ()\n", name, typ);
+            + "!%1$sRef = IO.performUnsafe $ FregeScriptEngineRef.new ()\n", name, typ);
         final String preludeScript = (String) context.getAttribute(
             FREGE_PRELUDE_SCRIPT_KEY, ScriptContext.ENGINE_SCOPE);
         final String newPreludeScript = preludeScript + newDef;

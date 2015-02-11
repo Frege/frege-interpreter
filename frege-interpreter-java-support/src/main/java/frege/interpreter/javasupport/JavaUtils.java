@@ -38,10 +38,19 @@ public class JavaUtils {
         return sandbox(new FutureTask<>(new Callable<Object>() {
             @Override
             public Object call() throws Exception {
-                prepareRuntime(stdinStr, outWriter, errWriter);
-                return fieldValue(className, variableName, loader);
+                return fieldValueWithRuntime(className, variableName, stdinStr, outWriter, errWriter, loader);
             }
         }), 5, TimeUnit.SECONDS);
+    }
+
+    public static Object fieldValueWithRuntime(final String className,
+                                                final String variableName,
+                                                final String stdinStr,
+                                                final StringWriter outWriter,
+                                                final StringWriter errWriter,
+                                                final InterpreterClassLoader loader) {
+        prepareRuntime(stdinStr, outWriter, errWriter);
+        return fieldValue(className, variableName, loader);
     }
 
     private static void prepareRuntime(final String stdinStr, final StringWriter outWriter, final StringWriter errWriter) {

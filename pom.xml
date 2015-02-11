@@ -16,7 +16,7 @@
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <frege.version>3.21.586-g026e8d7</frege.version>
+    <frege.version>3.22.367-g2737683</frege.version>
     <frege.plugin.version>1.0.5</frege.plugin.version>
     <ecj.version>4.2.2</ecj.version>
   </properties>
@@ -44,54 +44,15 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>com.theoryinpractise.frege</groupId>
-        <artifactId>frege-maven-plugin</artifactId>
-        <version>${frege.plugin.version}</version>
-        <exclusions>
-          <exclusion>
-            <groupId>org.apache.maven</groupId>
-            <artifactId>maven-core</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.codehaus.plexus</groupId>
-            <artifactId>plexus-compiler-api</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.apache.maven.plugin-tools</groupId>
-            <artifactId>maven-plugin-annotations</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.codehaus.plexus</groupId>
-            <artifactId>plexus-utils</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.apache.maven</groupId>
-            <artifactId>maven-plugin-api</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-exec</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-io</artifactId>
-          </exclusion>
-          <exclusion>
-            <groupId>commons-lang</groupId>
-            <artifactId>commons-lang</artifactId>
-          </exclusion>
-        </exclusions>
-      </dependency>
-      <dependency>
         <groupId>org.eclipse.jdt.core.compiler</groupId>
         <artifactId>ecj</artifactId>
         <version>${ecj.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.theoryinpractise.frege</groupId>
-        <artifactId>frege</artifactId>
-        <version>${frege.version}</version>
-      </dependency>
+          <groupId>com.theoryinpractise.frege</groupId>
+          <artifactId>frege</artifactId>
+          <version>${frege.version}</version>
+    </dependency>
     </dependencies>
   </dependencyManagement>
   <dependencies>
