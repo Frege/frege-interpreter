@@ -72,15 +72,17 @@ instance Monad (Interpreter config st) where
   (Interpreter r) >>= f = Interpreter $ r >>= g where
      g = Interpreter.unInterpreter . f
 
-data InterpreterConfig = InterpreterConfig {
-    predefs :: [String],
-    transformDefs :: [DefinitionS] -> StG [DefinitionS]
+data InterpreterConfig = InterpreterConfig
+  { predefs :: [String]
+  , transformDefs :: [DefinitionS] -> StG [DefinitionS]
+  , compilerFlags :: Flags
   } where
 
-  default = InterpreterConfig {
-    predefs = [],
-    transformDefs = removeDuplicateDefs
-  }
+  default = InterpreterConfig
+    { predefs = []
+    , transformDefs = removeDuplicateDefs
+    , compilerFlags = Flags.fromList [WARNINGS, HINTS, INLINE]
+    }
 
 data InterpreterState = InterpreterState {
   classLoader :: InterpreterClassLoader
@@ -200,7 +202,8 @@ typecheck src = do
   config <- Interpreter.ask
   state <- Interpreter.get
   let predefsSrc = intercalate newLine $ reverse config.predefs
-      (sourceType, global) = IO.performUnsafe $ StateT.run (run src predefsSrc (typecheckPasses config)) (interpreterCompilerEnv state.classLoader)
+      env = interpreterCompilerEnv state.classLoader config.compilerFlags
+      (sourceType, global) = IO.performUnsafe $ StateT.run (run src predefsSrc (typecheckPasses config)) env
   return (global, sourceType)
 
 interpret :: String ->  InterpreterApp InterpreterResult
@@ -321,7 +324,7 @@ findSourceType src predefs =
                    _ -> SourceType.ExpressionSource
   where
     calcSourceType src = fst $ IO.performUnsafe $ StateT.run (calculateSourceTypeST src) env
-    env = interpreterCompilerEnv InterpreterClassLoader.default
+    env = interpreterCompilerEnv InterpreterClassLoader.default (Flags.fromList [WARNINGS, HINTS, INLINE])
 
 calculateSourceTypeST :: String -> StIO (Maybe SourceType)
 calculateSourceTypeST src = do
@@ -345,10 +348,9 @@ calculateSourceTypeST src = do
 Compiler state with interpreter options
 There is no IO; The classes are loaded in memory.
 -}
-interpreterCompilerEnv loader = IO.performUnsafe $ do
+interpreterCompilerEnv loader compilerFlags = IO.performUnsafe $ do
   g <- standardOptions loader
-  let opts = createopts ["."] flags "." [] "" "<console>.fr"
-      flags = Flags.fromList [WARNINGS, HINTS]
+  let opts = createopts ["."] compilerFlags "." [] "" "<console>.fr"
   return g.{options = opts}
 
 stdCompilerEnv loader = IO.performUnsafe $ standardOptions loader

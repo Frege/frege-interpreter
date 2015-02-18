@@ -4,28 +4,24 @@
         xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>frege</groupId>
+        <groupId>org.frege-lang</groupId>
         <artifactId>frege-interpreter</artifactId>
         <version>1.0.3-SNAPSHOT</version>
     </parent>
-    <groupId>frege</groupId>
     <artifactId>frege-script-engine</artifactId>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-    <build>
-        <plugins>
 
-        </plugins>
-    </build>
     <dependencies>
         <dependency>
-            <groupId>${project.groupId}</groupId>
+            <groupId>org.frege-lang</groupId>
             <artifactId>frege-interpreter-core</artifactId>
             <version>1.0.3-SNAPSHOT</version>
         </dependency>
         <dependency>
-            <groupId>frege</groupId>
+            <groupId>org.frege-lang</groupId>
             <artifactId>frege-interpreter-java-support</artifactId>
             <version>1.0.3-SNAPSHOT</version>
         </dependency>
