@@ -54,3 +54,7 @@ Desktop.ini
 
 #Intellij IDEA
 *.iml
+
+.gradle
+.idea
+build

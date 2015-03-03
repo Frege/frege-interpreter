@@ -1,0 +1,3 @@
+
+include "frege-interpreter-core", "frege-interpreter-distribution", "frege-interpreter-java-support", "frege-script-engine"
+
