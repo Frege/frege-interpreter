@@ -6,9 +6,9 @@ jdk:
 env:
   global:
     #  username
-    - secure: cOc6UP/yiYxamXYGVqOeXYs29GbzOSX94wetyhZFYV/Ul2SzcpSxh7V8L4yyavryC5VhEqXFG+TrUr3ms5nq+cwqPSOJGpre5y3vwKGcTaWbqtrXCSqGC4IP1t3mX5wDPop566mjuCbB7CL5cH+WPFO/k4vCk/2kTYKA9SS3Se0=
+    - secure: G+dwWBzQfy0csZD8YCGIlGsgYuU/5itJq74I5CXpsQXyNZ7ZVyPzs3IFjXNqXLq0ZIJ95q0t+0HY+e54p0dS6Z7g+mVs7cuXcOV8jSMG7aa4AVCey2Jp/cx/Z4c8ip21wNM+roddfskHe0Y6cAV3W+RSigy76pnUP6Ic4X9G58A=
     # password
-    - secure: cwshUU/9m8NUk5UDPnJ91zOm6mQBupTDIOdE1Gu8uoDye2Jajg741seYGHBXTJ0DACUoUwHAfyvdDx3+T1ajP0DA90Am0ie8xpdcI7h55QXIq6gLLDsUO9ySfv85goAT2iK4MUQn0W4Ujz6hwnMhL3gAbC/vQdAoJ4bBeCcl9Pk=
+    - secure: Ekw/Fb8VDc3Y626M0v81PlurYZSDb4P/RSbZXv5cNC+4YomX9E0RecYxuxbN31GOCRh1yifjqqFnZlRayRKwjlw6vWLqQpjOdxQAVW3WN9NFFncCYeh40/WwUJYGNtOPqHvSI5/LTg+di5QTYi0txopwPvJ0KIL73a8lBXCBOk0=
 
 after_success:
   - ./gradlew upload -PsonatypeUsername="$SONATYPE_USERNAME" -PsonatypePassword="$SONATYPE_PASSWORD" -i -s
