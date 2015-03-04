@@ -10,11 +10,10 @@ ext {
     projectUrl ="https://github.com/Frege/frege-interpreter"
     projectName = "Frege Interpreter"
     pomProjectName = projectName
-//    baseJarName = "native-gen"
 
-    groupName = "com.github.mperry.frege"
-    scmUrl = "git://github.com/mperry/native-gen.git"
-    scmGitFile = "scm:git@github.com:Frege/native-gen.git"
+    groupName = "org.frege-lang"
+    scmUrl = "git://github.com:Frege/frege-interpreter.git"
+    scmGitFile = "scm:git@github.com:Frege/frege-interpreter.git"
     projectDescription = projectName
 
     licenseName = "BSD 3-clause license"

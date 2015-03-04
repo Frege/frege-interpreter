@@ -33,16 +33,14 @@ subprojects {
     defaultTasks "build"
 
     ext {
-        baseVersion = "1.1"
+        baseVersion = "1.0.3"
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
 
         fregeBaseVersion = "3.22.367"
         fregeClassifier = "-g2737683"
-
         fregeVersion = "$fregeBaseVersion$fregeClassifier"
-//        fregeVersion = "3.22.324-g630677b"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"
