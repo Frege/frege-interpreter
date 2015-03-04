@@ -6,5 +6,5 @@ env:
   - secure: daGV1Tq6fuVH4c8jnXqt4A6/sSOgFaqnbM/SvCbtECbV1wCjze1dPMm/eWQ1jlbQ1N26LQcV9u2RPp0BjyYKyjkD4UxIkQVm5VBlUYYRPnfNWp+ujZkod+gp+ozNt08Z6tua45H6pIDaniaPrI3nt+SrJKzVn+CzR7chPFYYGYg=
   - secure: b02AI1IMUyjVyMGc2ducQZaYkZiqZCOwSzoRUzy6sAQKnvCsRYm4DzZd4OwNMS6IeBDlPRpoXojOE0MM4CtNNUPILx6hLATOuRZzxjB8UvaMTKGtBZeKCtXVedPaDPOvaZEu5IMpIbPbRiUD+Mqj+1LZkYvRuNDwc13Jepu0xoo=
 after_success:
-- ./deploy.sh
+- chmod +x ./deploy.sh; ./deploy.sh
 
