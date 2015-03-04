@@ -12,7 +12,7 @@ ext {
     pomProjectName = projectName
 //    baseJarName = "native-gen"
 
-    groupName = "org.frege-lang"
+    groupName = "com.github.mperry.frege"
     scmUrl = "git://github.com/mperry/native-gen.git"
     scmGitFile = "scm:git@github.com:Frege/native-gen.git"
     projectDescription = projectName

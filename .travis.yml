@@ -2,3 +2,14 @@ language: java
 
 jdk:
   - oraclejdk8
+
+env:
+  global:
+    #  username
+    - secure: "cOc6UP/yiYxamXYGVqOeXYs29GbzOSX94wetyhZFYV/Ul2SzcpSxh7V8L4yyavryC5VhEqXFG+TrUr3ms5nq+cwqPSOJGpre5y3vwKGcTaWbqtrXCSqGC4IP1t3mX5wDPop566mjuCbB7CL5cH+WPFO/k4vCk/2kTYKA9SS3Se0="
+    # password
+    - secure: "cwshUU/9m8NUk5UDPnJ91zOm6mQBupTDIOdE1Gu8uoDye2Jajg741seYGHBXTJ0DACUoUwHAfyvdDx3+T1ajP0DA90Am0ie8xpdcI7h55QXIq6gLLDsUO9ySfv85goAT2iK4MUQn0W4Ujz6hwnMhL3gAbC/vQdAoJ4bBeCcl9Pk="
+
+after_success:
+  - ./gradlew upload -sonatypeUsername="${SONATYPE_USERNAME}" -sonatypePassword="${SONATYPE_PASSWORD}"
+
