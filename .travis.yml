@@ -1,6 +1,6 @@
 language: java
 jdk:
-- oraclejdk7
+- oraclejdk8
 env:
   global:
   - secure: daGV1Tq6fuVH4c8jnXqt4A6/sSOgFaqnbM/SvCbtECbV1wCjze1dPMm/eWQ1jlbQ1N26LQcV9u2RPp0BjyYKyjkD4UxIkQVm5VBlUYYRPnfNWp+ujZkod+gp+ozNt08Z6tua45H6pIDaniaPrI3nt+SrJKzVn+CzR7chPFYYGYg=
