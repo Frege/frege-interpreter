@@ -11,5 +11,5 @@ env:
     - secure: "cwshUU/9m8NUk5UDPnJ91zOm6mQBupTDIOdE1Gu8uoDye2Jajg741seYGHBXTJ0DACUoUwHAfyvdDx3+T1ajP0DA90Am0ie8xpdcI7h55QXIq6gLLDsUO9ySfv85goAT2iK4MUQn0W4Ujz6hwnMhL3gAbC/vQdAoJ4bBeCcl9Pk="
 
 after_success:
-  - ./gradlew upload -PsonatypeUsername=$SONATYPE_USERNAME -PsonatypePassword=$SONATYPE_PASSWORD -i -s
+  - ./gradlew upload -PsonatypeUsername="$SONATYPE_USERNAME" -PsonatypePassword="$SONATYPE_PASSWORD" -i -s
 
