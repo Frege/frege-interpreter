@@ -5,7 +5,7 @@
 *.class
 #*.jar
 target/
-bin/
+
 
 ##################
 ## Emacs autosave
