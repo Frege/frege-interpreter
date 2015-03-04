@@ -19,17 +19,6 @@ buildscript {
 
 allprojects {
 
-    task info << {
-
-
-        println "sonatypeUsername: ${project.hasProperty('sonatypeUsername') ? sonatypeUsername : 'none'}"
-        println "sonatypePassword: ${project.hasProperty('sonatypePassword') ? sonatypePassword : 'none'}"
-
-        println "sonatypeUsername: ${sonatypeUsername}"
-        println "sonatypePassword: ${sonatypePassword}"
-    }
-
-
 }
 
 subprojects {
