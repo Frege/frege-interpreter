@@ -3,7 +3,7 @@ jdk:
 - oraclejdk8
 env:
   global:
-  - secure: BxEtpII1RY2lChm53mqqThAjTMtqJtZmNuKUilNbZJfLzOtsob+xwFKvPMKpheiYzt+1ywzanL1PreRDpuP+wznKc6r9KJoTF73zsX0oLvyiwC2GniUbdfVKffy6sm/0DeHKzR1LXbCvsZi7YcHD1YSNO3wk+jK5Lv9hcB/6oX0=
-  - secure: Klcq2CzzHsAMLWRpjYztdB4C/tG2E0q8VJZpFarWbqb6lDXBLL6HQ2eOmn/I84ZAzJZmWHaSAUIacsc1MRJ7aJWWARI0tRStYzyzJClLgB4sjCNuUUeDRIkftgSLhgFxZQyo704Eo0FcswYkqFfmnkzxFvN7NB93WUnLbD/NE5c=
+  - secure: CEtTDSmSgzlYhysz1Nkg5Sx9PpvSS2FMq7KIHm7fGsZubWOuQmX/yBZBuTyV3KNKadWWyT9zh/zHZsF+U+NBsFg7kRBk44U4ZZfuKW3LbdTNjcWLyo/XK8SOyg6r69fLIT0pg5fKLYYXYXGKGKR0waPM6iFlp60AEfZpQ9ZfU9w=
+  - secure: WvTZK86timtWz4qQRXTPhDhK+F28X8k51rw3wZ3AgLJAFkfaQVRJ1CbpZowTZpQx1aMOHG7reRAvEgDPdd+GegCXhDNdX9MWfALpW8fVZNbZYCGpsuONDT75YxN06dKv7qaDGrNCY3ktkii3x36BqWmvg5t1FXz48dkrwwxEnhY=
 after_success:
 - chmod +x ./deploy.sh; ./deploy.sh
