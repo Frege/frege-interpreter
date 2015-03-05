@@ -1,4 +1,4 @@
-#Frege Interpreter#
+#Frege Interpreter  [![Build Status](https://travis-ci.org/Frege/frege-interpreter.svg)](https://travis-ci.org/Frege/frege-interpreter)
 
 This is an interpreter for Frege.
 
