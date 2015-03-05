@@ -3,9 +3,9 @@
 ##########################
 *~
 *.class
-*.jar
+#*.jar
 target/
-bin/
+
 
 ##################
 ## Emacs autosave
@@ -54,3 +54,7 @@ Desktop.ini
 
 #Intellij IDEA
 *.iml
+
+.gradle
+.idea
+build
