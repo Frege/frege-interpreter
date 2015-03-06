@@ -18,3 +18,9 @@ Checkout this project and then from project root, run ```mvn install```
 **Binary** 
 
 Under releases page [here](https://github.com/Frege/frege-interpreter/releases).
+
+## Continuous Integration
+
+Travis: https://travis-ci.org/Frege/frege-interpreter/
+
+Sonatype: https://oss.sonatype.org/content/groups/public/org/frege-lang/
