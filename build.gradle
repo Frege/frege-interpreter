@@ -45,6 +45,9 @@ subprojects {
 
     apply from: "$rootDir/gradle/sonatype.gradle"
 
+    sourceCompatibility = 1.7
+    targetCompatibility = 1.7
+
     version = projectVersion
     group = groupName
     archivesBaseName = project.name
