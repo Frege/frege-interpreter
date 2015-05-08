@@ -16,9 +16,13 @@ buildscript {
 apply plugin: 'io.codearte.nexus-staging'
 
 allprojects {
-
     defaultTasks "build"
+
+    tasks.withType(JavaCompile) {
+       options.encoding = 'UTF-8'
+    }
 }
+
 
 subprojects {
 
@@ -35,9 +39,8 @@ subprojects {
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
 
-        fregeBaseVersion = "3.22.367"
-        fregeClassifier = "-g2737683"
-
+        fregeBaseVersion = "3.22.524"
+        fregeClassifier = "-gcc99d7e"
         fregeVersion = "$fregeBaseVersion$fregeClassifier"
     }
 
@@ -61,7 +64,6 @@ subprojects {
     dependencies {
         compile "org.frege-lang:frege:$fregeVersion"
     }
-
 
     nexusStaging {
         packageGroup = groupName

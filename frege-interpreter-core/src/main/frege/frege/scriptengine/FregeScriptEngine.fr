@@ -1,0 +1,385 @@
+module frege.scriptengine.FregeScriptEngine where
+
+import frege.interpreter.FregeInterpreter
+import Data.List (intercalate)
+
+native module where {
+
+    public static class FregeScriptEngineFactory implements javax.script.ScriptEngineFactory {
+
+      private static final java.util.List<String> NAMES = java.util.Arrays.asList("fr", "frege");
+
+      @Override
+      public String getEngineName() {
+        return "frege";
+      }
+
+      @Override
+      public String getEngineVersion() {
+        return "1.0";
+      }
+
+      @Override
+      public java.util.List<String> getExtensions() {
+        return NAMES;
+      }
+
+      @Override
+      public java.util.List<String> getMimeTypes() {
+        return java.util.Arrays.asList("");
+      }
+
+      @Override
+      public java.util.List<String> getNames() {
+        return NAMES;
+      }
+
+      @Override
+      public String getLanguageName() {
+        return "frege";
+      }
+
+      @Override
+      public String getLanguageVersion() {
+        return frege.Version.version;
+      }
+
+      @Override
+      public Object getParameter(final String key) {
+        return null;
+      }
+
+      @Override
+      public String getMethodCallSyntax(final String obj, final String m, final String... args) {
+        return null;
+      }
+
+      @Override
+      public String getOutputStatement(final String toDisplay) {
+        return null;
+      }
+
+      @Override
+      public String getProgram(final String... statements) {
+        return null;
+      }
+
+      @Override
+      public javax.script.ScriptEngine getScriptEngine() {
+        try {
+          return new JFregeScriptEngine(this);
+        } catch (final Throwable e) {
+          e.printStackTrace();
+        }
+        return null;
+      }
+
+    }
+
+    public static class JFregeScriptEngine extends javax.script.AbstractScriptEngine implements
+      javax.script.Compilable {
+
+    private final javax.script.ScriptEngineFactory factory;
+
+    public JFregeScriptEngine(final javax.script.ScriptEngineFactory factory) {
+        this.factory = factory;
+        frege.scriptengine.FregeScriptEngine.init(this, factory).apply(1).result().forced();
+    }
+
+    @Override
+    public Object eval(final String script, final javax.script.ScriptContext context)
+        throws javax.script.ScriptException {
+        Object res = frege.scriptengine.FregeScriptEngine.eval(script, context).apply(1).result().forced();
+        if (res instanceof frege.prelude.PreludeBase.TMaybe) {
+            frege.prelude.PreludeBase.TMaybe maybe = (frege.prelude.PreludeBase.TMaybe) res;
+            if (frege.prelude.Maybe.isJust(maybe)) {
+                return frege.prelude.Maybe.unJust(maybe);
+            }
+
+        }
+        return null;
+    }
+
+    @Override
+    public Object eval(final java.io.Reader reader, final javax.script.ScriptContext context) {
+      Object res = frege.scriptengine.FregeScriptEngine.eval(reader, context).apply(1).result().forced();
+      if (res instanceof frege.prelude.PreludeBase.TMaybe) {
+            frege.prelude.PreludeBase.TMaybe maybe = (frege.prelude.PreludeBase.TMaybe) res;
+            if (frege.prelude.Maybe.isJust(maybe)) {
+                return frege.prelude.Maybe.unJust(maybe);
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public javax.script.Bindings createBindings() {
+        return new javax.script.SimpleBindings();
+    }
+
+    @Override
+    public javax.script.ScriptEngineFactory getFactory() {
+        return this.factory;
+    }
+
+    @Override
+    public javax.script.CompiledScript compile(final String script) throws javax.script.ScriptException {
+      return frege.scriptengine.FregeScriptEngine.compile(this, script, context).apply(1).result().forced();
+    }
+
+    @Override
+    public javax.script.CompiledScript compile(final java.io.Reader reader) throws javax.script.ScriptException {
+      return frege.scriptengine.FregeScriptEngine.compileReader(this, reader, context).apply(1).result().forced();
+    }
+
+    @Override
+    public void put(final String key, final Object value) {
+    final String[] nameAndType = key.split("::");
+        final String name = nameAndType[0].trim();
+        final String type = nameAndType.length < 2 ? "a" : nameAndType[1].trim();
+      frege.scriptengine.FregeScriptEngine.put(this, context, key, value).apply(1).result().forced();
+      super.put(name, value);
+    }
+
+  }
+
+  private static final String FREGE_BINDINGS_KEY = "frege.scriptengine.bindings";
+  private static final String PRELUDE_SCRIPT_CLASS_NAME = "frege.scriptengine.PreludeScript";
+
+  public static Object jEvalSym(final javax.script.ScriptContext context,
+                           final frege.interpreter.javasupport.InterpreterClassLoader classLoader,
+                           final String className,
+                           final String varName) throws javax.script.ScriptException {
+      final Object res;
+      java.util.Map<String, Object> bindings = (java.util.Map<String, Object>) context.getAttribute(FREGE_BINDINGS_KEY);
+      try {
+          if (bindings != null && !bindings.isEmpty()) {
+              Class<?> preludeClass = classLoader.loadClass(PRELUDE_SCRIPT_CLASS_NAME);
+              injectValues(bindings, preludeClass);
+          }
+          res = frege.interpreter.javasupport.JavaUtils.fieldValue(className, varName, classLoader);
+      } catch (Throwable throwable) {
+          throw new javax.script.ScriptException(throwable.toString());
+      }
+
+      return res;
+  }
+
+  public static void injectValues(final java.util.Map<String, Object> bindings,
+	    final Class<?> clazz) {
+      try {
+        for (final java.util.Map.Entry<String, Object> entry: bindings.entrySet()) {
+          final java.lang.reflect.Field field = clazz.getDeclaredField(entry.getKey());
+          final Ref ref = (Ref) field.get(null);
+          ref.set(entry.getValue());
+        }
+      } catch (final Exception e) {
+        throw new RuntimeException(e);
+      }
+  }
+
+  public static javax.script.CompiledScript newFregeCompiledScript(
+    String script,
+    javax.script.ScriptEngine scriptEngine,
+    frege.interpreter.FregeInterpreter.TInterpreterConfig config,
+    frege.interpreter.FregeInterpreter.TInterpreterResult result,
+    frege.interpreter.javasupport.InterpreterClassLoader classLoader) {
+    return new FregeCompiledScript(script, scriptEngine, config, result, classLoader);
+
+  }
+
+  public static class FregeCompiledScript extends javax.script.CompiledScript {
+
+    private String script;
+    private javax.script.ScriptEngine scriptEngine;
+    private frege.interpreter.FregeInterpreter.TInterpreterConfig config;
+    private frege.interpreter.FregeInterpreter.TInterpreterResult result;
+    private frege.interpreter.javasupport.InterpreterClassLoader classLoader;
+
+    public FregeCompiledScript(
+      String script,
+      javax.script.ScriptEngine scriptEngine,
+      frege.interpreter.FregeInterpreter.TInterpreterConfig config,
+      frege.interpreter.FregeInterpreter.TInterpreterResult result,
+      frege.interpreter.javasupport.InterpreterClassLoader classLoader) {
+
+      this.script = script;
+      this.scriptEngine = scriptEngine;
+      this.config = config;
+      this.result = result;
+      this.classLoader = classLoader;
+    }
+
+    @Override
+    public Object eval(final javax.script.ScriptContext context) throws javax.script.ScriptException {
+        return FregeScriptEngine.evalResult(script, config, context, result, classLoader).apply(1).result().forced();
+    }
+
+    @Override
+    public javax.script.ScriptEngine getEngine() {
+        return scriptEngine;
+    }
+  }
+
+  /**
+   * Used in Frege Script Engine to pass values from host environment to scripting
+   * environment
+   *
+   * @param <A>
+   */
+  public static class Ref<A> {
+
+    private A value;
+
+    public A get() {
+      return value;
+    }
+
+    public void set(final A value) {
+      this.value = value;
+    }
+
+  }
+
+}
+
+eval :: String -> MutableIO ScriptContext -> IO (Maybe a)
+eval script context = do
+  state <- getInterpreterState context
+  config <- getInterpreterConfig context
+  (res, newState) <- Interpreter.run (interpret script) config state
+  evalResult script config context res newState
+
+evalResult :: String -> InterpreterConfig -> MutableIO ScriptContext -> InterpreterResult -> MutableIO InterpreterClassLoader -> IO (Maybe a)
+evalResult script config context res state =
+  case res of
+    InterpreterResult.Success{sourceRepr=sourceRepr, compilerState=g} -> do
+      case sourceRepr of
+        Module moduleName -> do
+          context.setAttribute classLoaderKey state ScriptContext.engineScope
+          return Nothing
+        Definitions syms separatorSym -> do
+          let varName = separatorSym.name.base
+              separator = varName ++ " = 0"
+              updatePredefs predefs = predefs ++ "\n" ++ separator ++ "\n" ++ script
+              newConfig = config.{predefs<-updatePredefs}
+          context.setAttribute configKey newConfig ScriptContext.engineScope
+          return Nothing
+        Expression sym -> do
+          let className = symbolClass sym g
+              varName = symbolVar sym g
+          Just <$> evalSym context state className varName
+    InterpreterResult.Failure messages -> error $ show messages
+
+compile :: MutableIO ScriptEngine -> String -> MutableIO ScriptContext -> IOMutable CompiledScript
+compile engine script context = do
+  state <- getInterpreterState context
+  config <- getInterpreterConfig context
+  (res, newState) <- Interpreter.run (interpret script) config state
+  createFregeCompiledScript script engine config res newState
+
+compileReader :: MutableIO ScriptEngine -> Reader -> MutableIO ScriptContext -> IOMutable CompiledScript
+compileReader engine reader context = do
+  bufReader <- BufferedReader.new reader
+  lines <- bufReader.getLines
+  compile engine (intercalate "\n" lines) context
+
+put :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> a -> IO (Maybe a)
+put engine context key value = do
+  let xs = map trim . toList $ split key "::"
+      f name typ = do
+                    updateCurrentScript engine context name typ
+                    updatePreludeScript engine context name typ
+                    updateBindings engine context value name
+                    loadScriptingPrelude context
+  case xs of
+    (name: typ: _) -> f name typ
+    (name: _) -> f name "a"
+    _ -> return Nothing
+
+updateCurrentScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
+updateCurrentScript engine context name typ = do
+  config <- getInterpreterConfig context
+  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
+  let newScript = String.format "\n%1$s :: %2$s\n%1$s = FregeScriptEngineRef.get %3$s" name typ (name ++ "Ref")
+      preludeImport = "\nimport " ++ preludeScriptClassName ++ "\n"
+      newPredefs = maybe (config.predefs ++ "\n" ++ preludeImport ++ "\n" ++ newScript) (const $ config.predefs ++ "\n" ++ newScript) bindingsMaybe
+      newConfig = config.{predefs=newPredefs}
+  context.setAttribute configKey newConfig ScriptContext.engineScope
+
+updatePreludeScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
+updatePreludeScript engine context name typName = do
+  let typ = "FregeScriptEngineRef (" ++ typName ++ ")"
+      newDef = String.format ("\n%1$sRef :: %2$s\n" ++ "!%1$sRef = IO.performUnsafe $ FregeScriptEngineRef.new ()\n") name typ
+  preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
+  let newPreludeScript = (maybe "" id preludeScript) ++ newDef
+  println $ show preludeScript
+  context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
+
+updateBindings :: MutableIO ScriptEngine -> MutableIO ScriptContext -> a -> String -> IO ()
+updateBindings engine context value name = do
+  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
+  let newBindings = do
+                      m <- HashMap.new ()
+                      context.setAttribute fregeBindingsKey m ScriptContext.engineScope
+                      return m
+  bindings <- maybe newBindings (return . id) bindingsMaybe
+  bindings.put (name ++ "Ref") value
+  return ()
+
+loadScriptingPrelude :: MutableIO ScriptContext -> IO (Maybe a)
+loadScriptingPrelude context = do
+  scriptMaybe <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
+  maybe (return Nothing) (\script -> println "evaluating prelude" >> eval script context) scriptMaybe
+
+getInterpreterState :: Mutable s ScriptContext -> STMutable s InterpreterClassLoader
+getInterpreterState context = do
+  classLoaderMaybe <- context.getAttribute classLoaderKey
+  maybe (InterpreterClassLoader.new ()) (return . id) classLoaderMaybe
+
+getInterpreterConfig :: Mutable s ScriptContext -> ST s InterpreterConfig
+getInterpreterConfig context = do
+  configMaybe <- context.getAttribute configKey
+  return $ maybe InterpreterConfig.default id configMaybe
+
+native evalSym frege.scriptengine.FregeScriptEngine.jEvalSym
+  :: MutableIO ScriptContext -> MutableIO InterpreterClassLoader -> String -> String -> IO a throws ScriptException
+
+init :: Mutable s ScriptEngine -> Mutable s ScriptEngineFactory -> ST s ()
+init engine factory = do
+  context <- getContext engine
+  context.setAttribute fregePreludeScriptKey preludeDef ScriptContext.engineScope
+
+native getContext :: Mutable s ScriptEngine -> STMutable s ScriptContext
+
+data ScriptEngine = native javax.script.ScriptEngine
+data ScriptEngineFactory = native javax.script.ScriptEngineFactory
+data ScriptException = native javax.script.ScriptException
+derive Exceptional ScriptException
+
+data ScriptContext = native javax.script.ScriptContext where
+  pure native engineScope javax.script.ScriptContext.ENGINE_SCOPE :: Int
+  native getAttribute :: Mutable s ScriptContext -> String -> ST s (Maybe a)
+                       | Mutable s ScriptContext -> String -> Int -> ST s (Maybe a)
+
+  native setAttribute :: Mutable s ScriptContext -> String -> a -> Int -> ST s ()
+
+data CompiledScript = native javax.script.CompiledScript
+
+native createFregeCompiledScript FregeScriptEngine.newFregeCompiledScript
+  :: String -> Mutable s ScriptEngine -> InterpreterConfig -> InterpreterResult -> Mutable s InterpreterClassLoader -> STMutable s CompiledScript
+
+pure native split :: String -> String -> JArray String
+pure native trim :: String -> String
+
+fregePreludeScriptKey = "frege.scriptengine.preludeScript"
+classLoaderKey = "frege.scriptengine.classloader"
+configKey = "frege.scriptengine.currentDefs"
+preludeScriptClassName = "frege.scriptengine.PreludeScript"
+fregeBindingsKey = "frege.scriptengine.bindings"
+
+preludeDef =
+  "module " ++ preludeScriptClassName ++ " where\n"
+  ++ "data FregeScriptEngineRef a = pure native " ++ "frege.scriptengine.FregeScriptEngine.Ref" ++ " where\n"
+  ++ "  native new :: () -> ST s (FregeScriptEngineRef a)\n"
+  ++ "  pure native get :: FregeScriptEngineRef a -> a\n"
