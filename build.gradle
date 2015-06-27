@@ -28,7 +28,7 @@ subprojects {
     defaultTasks "build"
 
     ext {
-        baseVersion = "1.1"
+        baseVersion = "1.0.4"
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
@@ -59,4 +59,18 @@ subprojects {
         compile "com.theoryinpractise.frege:frege:$fregeVersion"
     }
 
+    tasks.classes.dependsOn "checkValidVersion"
+
+
+    task checkValidVersion << {
+        checkValidVersion(JavaVersion.VERSION_1_7, JavaVersion.current())
+    }
+
+}
+
+
+def checkValidVersion(JavaVersion expected, JavaVersion actual) {
+    if (expected != actual) {
+        throw new GradleException("Require Java version $expected, actual version is $actual")
+    }
 }
