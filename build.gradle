@@ -8,7 +8,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath "org.frege-lang:frege-gradle-plugin:0.2"
+        classpath "org.frege-lang:frege-gradle-plugin:0.4"
         classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.5.3"
     }
 }
@@ -17,6 +17,7 @@ apply plugin: 'io.codearte.nexus-staging'
 
 allprojects {
 
+    defaultTasks "build"
 }
 
 subprojects {
@@ -27,16 +28,14 @@ subprojects {
     apply plugin: "signing"
     apply plugin: "frege"
 
-    defaultTasks "build"
-
     ext {
         baseVersion = "1.0.5"
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
 
-        fregeBaseVersion = "3.22.524"
-        fregeClassifier = "-gcc99d7e"
+        fregeBaseVersion = "3.22.367"
+        fregeClassifier = "-g2737683"
 
         fregeVersion = "$fregeBaseVersion$fregeClassifier"
     }
