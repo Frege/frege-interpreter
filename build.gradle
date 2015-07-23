@@ -28,9 +28,10 @@ subprojects {
     apply plugin: "signing"
     apply plugin: "frege"
 
+
     ext {
         baseVersion = "1.0.5"
-        isSnapshot = true
+        isSnapshot = false
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
 
