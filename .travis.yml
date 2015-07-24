@@ -1,9 +1,9 @@
 language: java
 jdk:
 - oraclejdk7
+sudo: false
 env:
   global:
-  - secure: jmf/wf+7i9ZeYDhmHKZxT655ARt3jCbOzmGlvrUb37pEqECeM/PrlJC9eFY1WB/VkSL2OMzqa0tAWW0lPCQyly4gMGYDr2BD1sa9P+IEUWOkzJFaYVzto0vKTcd5/Q+qQr1MnwOn6eQS3dEDK7qvN2Y0+15WBxHJfeO2bkJXPoQ=
   - secure: B6ckh2pJYwvbyjWOoWmMar8X9uwbVORDXjT0XBl5BIUNW1NwARpTyWm6hpjAFqoMu7P/JTOQHBIRl5CNHGC/1W09Viy6RZ9TNT6qyZJWr1ArwqxxXATwLK32QUq48ETVBOA3XLFQcwSN+sRu1obBuXQfIbC0sLrO9ITarpS6QJg=
 after_success:
 - chmod +x ./deploy.sh; ./deploy.sh
