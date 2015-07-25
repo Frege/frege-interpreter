@@ -13,7 +13,7 @@ This project also implements JSR 223, a scripting engine for Frege.
 
 **Build from sources**
 
-Checkout this project and then from project root, run ```mvn install```
+Checkout this project and then from project root, run ```./gradlew install```
 
 **Binary** 
 

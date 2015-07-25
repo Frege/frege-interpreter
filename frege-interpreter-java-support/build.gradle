@@ -1,6 +1,4 @@
 
 dependencies {
     compile "org.eclipse.jdt.core.compiler:ecj:4.2.2"
-
-
 }

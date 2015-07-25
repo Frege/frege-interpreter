@@ -8,7 +8,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath "org.frege-lang:frege-gradle-plugin:0.4"
+        classpath "org.frege-lang:frege-gradle-plugin:0.4.1"
         classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.5.3"
     }
 }
