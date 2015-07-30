@@ -31,7 +31,7 @@ subprojects {
 
     ext {
         baseVersion = "1.1.1"
-        isSnapshot = true
+        isSnapshot = false
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
 
