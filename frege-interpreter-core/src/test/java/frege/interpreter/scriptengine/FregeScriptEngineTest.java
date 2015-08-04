@@ -1,19 +1,13 @@
-package frege.scriptengine;
+package frege.interpreter.scriptengine;
+
+import org.junit.Before;
+import org.junit.Test;
 
 import javax.script.Compilable;
 import javax.script.CompiledScript;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TestRule;
-import org.junit.rules.TestWatcher;
-import org.junit.runner.Description;
-import org.apache.commons.lang3.SystemUtils;
-
 import java.math.BigInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -127,13 +121,11 @@ public class FregeScriptEngineTest {
 
     @Test
     public void testOperators() throws ScriptException {
-        if (SystemUtils.IS_OS_UNIX) {
-            frege.eval("infix 1 `³`");
-            frege.eval("(x³) = x^3");
-            final Object expected = frege.eval("(2³)");
-            final Object actual = 8;
-            assertEquals(expected, actual);
-        }
+        frege.eval("infix 1 `³`");
+        frege.eval("(x³) = x^3");
+        final Object expected = frege.eval("(2³)");
+        final Object actual = 8;
+        assertEquals(expected, actual);
     }
 
     @Test

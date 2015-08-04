@@ -10,4 +10,5 @@ compileFrege {
 
 dependencies {
     compile project(":frege-interpreter-java-support")
+    testCompile("junit:junit:4.12")
 }

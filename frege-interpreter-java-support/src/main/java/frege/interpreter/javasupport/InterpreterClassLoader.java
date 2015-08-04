@@ -11,7 +11,6 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -34,7 +33,7 @@ public class InterpreterClassLoader extends URLClassLoader implements
     public InterpreterClassLoader(final ClassLoader parent,
                                   final Map<String, byte[]> classFiles) {
         super(new URL[0], parent);
-        this.classes = classFiles;
+        this.classes = new HashMap<>(classFiles);
     }
 
     @Override
