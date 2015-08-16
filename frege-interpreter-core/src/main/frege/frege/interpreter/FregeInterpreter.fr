@@ -216,6 +216,7 @@ javagen global = do
                            return (classLoader, Just javaSource)
                         else return (state, Nothing)
   ((loader, jsrc), g) <- liftIO $ StateT.run javagenSTT global
+  Interpreter.putCompilerState g
   Interpreter.put loader
   return jsrc
 
@@ -243,10 +244,12 @@ interpret line = do
  * 'run' all passes, one after another
  * until one of them returns an error
  -}
+run :: String
+    -> String
+    -> (String-> [(StateT Global IO (String,Int), String)])
+    -> StateT Global IO (Maybe SourceInfo)
 run src predefs steps = do
-    global <- getSTT
     scriptType <- findSourceType src predefs
-    StateT.put global
     let varName = findUnusedVariableName freshVarPrefix (predefs ++ src)
         source = buildScript src scriptType predefs "Console" varName
     changeSTT Global.{gen <- GenSt.{printer = stdout}}    -- just to have no undefined value there
@@ -256,9 +259,8 @@ run src predefs steps = do
     if g.errors == 0
       then case scriptType of
                 ModuleSource -> return . Just $ SourceInfo.Module $ className g
-                DefinitionsSource -> return $ SourceInfo.Definitions (getSymbols g.thisTab) <$> listToMaybe generatedSym
+                DefinitionsSource -> return . Just $ SourceInfo.Definitions (getSymbols g.thisTab)
                 ExpressionSource -> return $ SourceInfo.Expression <$> listToMaybe generatedSym
-
       else return Nothing
 
 browseModule :: String -> Interpreter (Maybe ([Symbol], Global))
@@ -268,17 +270,13 @@ browseModule moduleName = do
   syms <- liftIO $ StateT.run (browseSymbols moduleName) g
   return $ maybe Nothing (const $ Just syms) srcInfo
 
-
 browse :: String -> Interpreter (Maybe ([Symbol], Global))
 browse src = do
   res <- interpret src
   case res of
-    InterpreterResult.Success {sourceRepr=Definitions syms sym, compilerState=g} ->
-      return $ Just (symbolsAfter sym syms, g)
+    InterpreterResult.Success {sourceRepr=Definitions syms, compilerState=g} ->
+      return $ Just (syms, g)
     _ -> return Nothing
-
-symbolsAfter :: Symbol -> [Symbol] -> [Symbol]
-symbolsAfter sym syms = filter (\s -> s.pos.line > sym.pos.line + 1) syms
 
 typeof :: String -> Interpreter ([Message] | String)
 typeof expr = do
@@ -320,7 +318,6 @@ data MessageType = INFO | ERROR | WARNING | HINT where
 derive Show MessageType
 
 data Message = Message {pos :: Position, msgType :: MessageType, text :: String} where
-  showMessages = intercalate newLine . map show
   fromCompilerMessage (CompilerMessage.Msg pos sev text) =
     Message pos (MessageType.translateCompilerMsgType sev) text
 
@@ -331,8 +328,7 @@ data Message = Message {pos :: Position, msgType :: MessageType, text :: String}
   fromGlobal (g :: Global) = reverse $ map fromCompilerMessage g.sub.messages
 
 instance Show Message where
-  show (Message pos INFO txt) = txt
-  show (Message pos typ txt) = "[" ++ show typ ++ ": " ++ show pos ++ "]: " ++ txt
+  show msg = msg.text
 
 symbolVar :: Symbol -> Global -> String
 symbolVar SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 1
@@ -348,12 +344,13 @@ findSourceType :: String -> String -> StIO SourceType
 findSourceType src predefs = do
   env <- getSTT
   srcType <- calculateSourceTypeST src
+  StateT.put env -- reset state
   case srcType of
     Just ModuleSource -> return SourceType.ModuleSource
     Just ExpressionSource -> return SourceType.ExpressionSource
     otherwise -> do
-      StateT.put env
       srcType <- calculateSourceTypeST (buildScript src SourceType.DefinitionsSource predefs "T" "test")
+      StateT.put env -- reset state
       case srcType of
          Just ModuleSource -> return SourceType.DefinitionsSource
          _ -> return SourceType.ExpressionSource
@@ -424,22 +421,28 @@ derive Show SourceType
 
 data SourceInfo = Module String
                 | Expression Symbol
-                | Definitions [Symbol] Symbol
+                | Definitions [Symbol]
 
 instance Show SourceInfo where
   show (Module packName) = "Module " ++ packName
   show (Expression _) = "Expression"
-  show (Definitions _ _) = "Definitions"
+  show (Definitions _) = "Definitions"
 
 noDocComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
 
-buildScript script SourceType.DefinitionsSource predefs moduleName varName =
-  intercalate newLine [moduleDeclScript moduleName, predefs, varName ++ " = 0", script]
+buildScript script SourceType.DefinitionsSource predefs moduleName _ =
+  if null predefs
+    then (moduleDeclScript moduleName) ++ "\n" ++ script
+    else intercalate newLine [moduleDeclScript moduleName, predefs, script]
+
 buildScript script SourceType.ExpressionSource predefs moduleName varName =
-  intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
+  if null predefs
+    then intercalate newLine [moduleDeclScript moduleName, variableDeclScript varName script]
+    else intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
+
 buildScript script SourceType.ModuleSource predefs _ _ = script
 
 freshVarPrefix = "frege_interpreter_var"
