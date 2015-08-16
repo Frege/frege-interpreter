@@ -258,10 +258,8 @@ evalResult script config context res state =
         Module moduleName -> do
           context.setAttribute classLoaderKey state ScriptContext.engineScope
           return Nothing
-        Definitions syms separatorSym -> do
-          let varName = separatorSym.name.base
-              separator = varName ++ " = 0"
-              updatePredefs predefs = predefs ++ "\n" ++ separator ++ "\n" ++ script
+        Definitions syms -> do
+          let updatePredefs predefs = predefs ++ "\n" ++ script
               newConfig = config.{predefs<-updatePredefs}
           context.setAttribute configKey newConfig ScriptContext.engineScope
           return Nothing
