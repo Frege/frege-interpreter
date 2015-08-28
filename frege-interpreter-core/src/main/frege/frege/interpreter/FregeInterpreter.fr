@@ -496,9 +496,12 @@ createSName s
 
 match s regex = groups <$> s =~ regex where groups m = [m.group i | i <- [1..groupCount m]]
 
-buildShowScript varName state symbol
-  | isIO state symbol = "packed . take 80 . showChars $ IO.performUnsafe " ++ varName
-  | otherwise         = "packed . take 80 . showChars $ " ++ varName
+buildShowScript :: String -> Int -> Global -> Symbol -> String
+buildShowScript varName showLimit state symbol
+  | isIO state symbol = limit ++ " . showChars $ IO.performUnsafe " ++ varName
+  | otherwise         = limit ++ " . showChars $ " ++ varName
+  where
+    limit = "packed . take " ++ show showLimit
 
 openPrinter pw = do
     g <- getSTT
@@ -559,7 +562,6 @@ matching (_@DatDcl{name=x}) (_@DatDcl{name=y}) = x == y
 matching (_@JavDcl{name=x}) (_@JavDcl{name=y}) = x == y
 matching _ _ = false
 
---funcMatching d1 d2 | (traceLn $ show (funbinding d1) ++ show (funbinding d2)) = maybe false id $ (==) <$> funbinding d1 <*> funbinding d2
 funcMatching d1 d2 = maybe false id $ funcEq <$> funbinding d1 <*> funbinding d2 where
   funcEq :: Token -> Token -> Bool
   funcEq t1 t2 = t1.tokid == t2.tokid && t1.value == t2.value
