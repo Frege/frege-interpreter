@@ -126,6 +126,7 @@ standardOptions classLoader = do
     return Global {
             options = stdOptions,
             sub = Sub {
+                cache,
                 loader = urlClassLoader,
                 optab = Tree.empty,
                 toks = arrayFromList [],
@@ -451,11 +452,7 @@ freshVarRegex = regforce (freshVarPrefix ++ "(\\d+)")
 
 findUnusedVariableName prefix script = prefix ++ show unusedVarNum where
   unusedVarNum = maybe 1 id . listToMaybe $ dropWhile (flip elem used) [1..]
-  used = reverse $ map (maybe 1 atoi . maybe Nothing (_.group 1) . (=~ freshVarRegex)) (script ~~* freshVarRegex) --  loop m []
-  -- m = freshVarRegex.matcher script
-  -- loop :: Matcher -> [Int] -> [Int]
-  -- loop m1 acc | Just m2 <- m1.find = loop m2 ((maybe 1 atoi $ m2.group 1) : acc)
-  --             | otherwise = acc
+  used = reverse $ map (maybe 1 atoi . maybe Nothing (_.group 1) . (=~ freshVarRegex)) (script ~~* freshVarRegex)
 
 helpDoc :: String -> StIO [String]
 helpDoc source = do
