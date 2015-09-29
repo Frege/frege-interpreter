@@ -3,12 +3,15 @@ buildscript {
     repositories {
         mavenLocal()
         maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        maven {
             url = "https://oss.sonatype.org/content/groups/public"
         }
         mavenCentral()
     }
     dependencies {
-        classpath "org.frege-lang:frege-gradle-plugin:0.4.1"
+        classpath "gradle.plugin.org.frege-lang:frege-gradle-plugin:0.5"
         classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.5.3"
     }
 }
@@ -23,25 +26,19 @@ allprojects {
     }
 }
 
-
 subprojects {
 
     apply plugin: "java"
     apply plugin: "groovy"
     apply plugin: "maven"
     apply plugin: "signing"
-    apply plugin: "frege"
-
 
     ext {
         baseVersion = "1.2"
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
-
-        fregeBaseVersion = "3.23.288"
-        fregeClassifier = "-gaa3af0c"
-        fregeVersion = "$fregeBaseVersion$fregeClassifier"
+        fregeVersion = "3.23.288-gaa3af0c"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"

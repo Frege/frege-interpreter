@@ -1,14 +1,11 @@
 
-tasks.compileFrege.dependsOn "compileJava"
-
-compileFrege {
-    verbose = true
-    hints = true
-    make = true
-    inline = false
-}
+apply plugin: "org.frege-lang"
 
 dependencies {
     compile project(":frege-interpreter-java-support")
     testCompile("junit:junit:4.12")
+}
+
+compileTestFrege {
+    enabled = false
 }
