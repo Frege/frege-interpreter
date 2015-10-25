@@ -10,7 +10,7 @@ import Data.TreeMap (TreeMap Tree, values)
 import Data.List (sort, uniq, intercalate, nubBy, groupBy, sortBy, isPrefixOf)
 
 import Compiler.enums.Flags
-import Compiler.types.Global hiding (Message, Severity)
+import Compiler.types.Global hiding (Message, Severity, liftIO)
 import Compiler.types.Global (Message CompilerMessage, Severity())
 import Compiler.common.Desugar hiding (Program)
 import Compiler.common.Desugar (Program (Module ModuleProgram, Expression ExpressionProgram))
@@ -119,14 +119,12 @@ createopts sp flags dir path prefix source = stdOptions.{
 
 standardOptions :: MutableIO InterpreterClassLoader -> IO Global
 standardOptions classLoader = do
-    cache <- Ref.new Tree.empty -- start out with empty cache
     err <- StringWriter.new () >>= StringWriter.printer
     out <- StringWriter.new () >>= StringWriter.printer
     urlClassLoader <- asURLClassLoader classLoader
     return Global {
             options = stdOptions,
             sub = Sub {
-                cache,
                 loader = urlClassLoader,
                 optab = Tree.empty,
                 toks = arrayFromList [],

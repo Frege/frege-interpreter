@@ -38,7 +38,7 @@ subprojects {
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
-        fregeVersion = "3.23.288-gaa3af0c"
+        fregeVersion = "3.23.370-g898bc8c"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"
@@ -68,3 +68,4 @@ subprojects {
     }
 
 }
+
