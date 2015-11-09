@@ -40,6 +40,11 @@ public class CompilationInfo {
       if (res.getProblems() != null) {
         for (final CategorizedProblem problem : res.getProblems()) {
           if (problem.isError()) {
+            msgBuilder.append("Native error: ");
+            msgBuilder.append(problem.getOriginatingFileName());
+            msgBuilder.append(":");
+            msgBuilder.append(problem.getSourceLineNumber());
+            msgBuilder.append(": ");
             msgBuilder.append(problem.getMessage());
             msgBuilder.append("\n");
           }
