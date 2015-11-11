@@ -11,7 +11,7 @@ import Data.List (sort, uniq, intercalate, nubBy, groupBy, sortBy, isPrefixOf)
 
 import Compiler.enums.Flags
 import Compiler.types.Global hiding (Message, Severity, liftIO)
-import Compiler.types.Global (Message CompilerMessage, Severity())
+import Compiler.types.Global (Message CompilerMessage, Severity(), SubSt, GenSt)
 import Compiler.common.Desugar hiding (Program)
 import Compiler.common.Desugar (Program (Module ModuleProgram, Expression ExpressionProgram))
 import Compiler.types.SourceDefinitions
@@ -122,56 +122,11 @@ standardOptions classLoader = do
     err <- StringWriter.new () >>= StringWriter.printer
     out <- StringWriter.new () >>= StringWriter.printer
     urlClassLoader <- asURLClassLoader classLoader
-    return Global {
-            options = stdOptions,
-            sub = Sub {
-                loader = urlClassLoader,
-                optab = Tree.empty,
-                toks = arrayFromList [],
-                idKind = Tree.empty,
-                sourcedefs = [],
-                packageDoc = Nothing,
-                thisPos  = Position.null,
-                nsPos = Tree.empty,
-                packWhy = Tree.empty,
-                nsUsed = Tree.empty,
-                thisPack = Pack.new "",
-                numErrors  = 0,
-                resErrors = 0,
-                messages = [],
-                cancelled = return false,
-                nextPass = 1,
-                stderr = err,
-                toExport = [],
-                funPointers = empty,
-            },
-            gen = Gen {
-                printer = out,
-                tunique = 0,
-                runique = 0,
-                sunique = 0,
-                xunique = 1,
-                kunique = 1,
-                tTree = Tree.empty,
-                rTree = Tree.empty,
-                sTree = Tree.empty,
-                xTree = Tree.empty .insert defEA 0,        -- so that 0 never indexes valid expression
-                kTree = Tree.empty .insert (KindA {kind=0, suba=0, subb=0}) 0, -- kind0 = *
-                expSym = Tree.empty,
-                consts = Tree.empty,
-                lambdas = Tree.empty,
-                syminfo = Tree.empty,
-                jimport = Tree.empty,
-            },
-            unique = 1,
-            packages = Tree.empty,
-            namespaces = Tree.empty,
-            genEnv = [],
-            javaEnv = Tree.empty,
-            locals = Tree.empty,
-            typEnv = [],
-            tySubst = Tree.empty
-        }
+    global <- standardGlobal
+    return global.{
+        sub <- SubSt.{loader=urlClassLoader, stderr=err},
+        gen <- GenSt.{printer=out}
+      }
 
 data InterpreterResult = Success
                          { sourceRepr :: SourceInfo,
