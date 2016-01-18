@@ -368,8 +368,6 @@ data CompiledScript = native javax.script.CompiledScript
 native createFregeCompiledScript FregeScriptEngine.newFregeCompiledScript
   :: String -> Mutable s ScriptEngine -> InterpreterConfig -> InterpreterResult -> Mutable s InterpreterClassLoader -> STMutable s CompiledScript
 
-pure native trim :: String -> String
-
 fregePreludeScriptKey = "frege.scriptengine.preludeScript"
 classLoaderKey = "frege.scriptengine.classloader"
 configKey = "frege.scriptengine.currentDefs"
