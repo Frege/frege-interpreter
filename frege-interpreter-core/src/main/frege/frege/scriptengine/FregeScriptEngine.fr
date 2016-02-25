@@ -103,7 +103,8 @@ native module where {
 
     @Override
     public Object eval(final java.io.Reader reader, final javax.script.ScriptContext context) {
-      Object res = frege.scriptengine.FregeScriptEngine.eval(reader, context).apply(1).result().forced();
+      String script = new java.util.Scanner(reader).useDelimiter("\\A").next();
+      Object res = frege.scriptengine.FregeScriptEngine.eval(script, context).apply(1).result().forced();
       if (res instanceof frege.prelude.PreludeBase.TMaybe) {
             frege.prelude.PreludeBase.TMaybe maybe = (frege.prelude.PreludeBase.TMaybe) res;
             if (frege.prelude.Maybe.isJust(maybe)) {
@@ -308,11 +309,11 @@ updateCurrentScript engine context name typ = do
 
 updatePreludeScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
 updatePreludeScript engine context name typName = do
+  config <- getInterpreterConfig context
   let typ = "FregeScriptEngineRef (" ++ typName ++ ")"
       newDef = String.format ("\n%1$sRef :: %2$s\n" ++ "!%1$sRef = IO.performUnsafe $ FregeScriptEngineRef.new ()\n") name typ
   preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
-  let newPreludeScript = (maybe "" id preludeScript) ++ newDef
-  println $ show preludeScript
+  let newPreludeScript = (maybe "" id preludeScript) ++ config.predefs ++ "\n" ++ newDef
   context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
 
 updateBindings :: MutableIO ScriptEngine -> MutableIO ScriptContext -> a -> String -> IO ()
@@ -329,7 +330,7 @@ updateBindings engine context value name = do
 loadScriptingPrelude :: MutableIO ScriptContext -> IO (Maybe a)
 loadScriptingPrelude context = do
   scriptMaybe <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
-  maybe (return Nothing) (\script -> println "evaluating prelude" >> eval script context) scriptMaybe
+  maybe (return Nothing) (\script -> eval script context) scriptMaybe
 
 getInterpreterState :: Mutable s ScriptContext -> STMutable s InterpreterClassLoader
 getInterpreterState context = do

@@ -216,12 +216,11 @@ run src predefs steps = do
                 ExpressionSource -> return $ SourceInfo.Expression <$> listToMaybe generatedSym
       else return Nothing
 
-browseModule :: String -> Interpreter (Maybe (String, [Symbol], Global))
+browseModule :: String -> Interpreter (Maybe ([Symbol], Global))
 browseModule moduleName = do
   (g, srcInfo) <- typecheck "\"\""
-  (moduleDoc, g) <- liftIO $ (Imp.getFP (magicPack moduleName)).run g
-  (syms, g) <- liftIO $ StateT.run (browseSymbols moduleName) g
-  return $ maybe Nothing (const $ Just (either (const "") (maybe "" _.doc) moduleDoc, syms, g)) srcInfo
+  syms <- liftIO $ StateT.run (browseSymbols moduleName) g
+  return $ fmap (const syms) srcInfo
 
 browse :: String -> Interpreter (Maybe ([Symbol], Global))
 browse src = do
@@ -281,7 +280,7 @@ data Message = Message {pos :: Position, msgType :: MessageType, text :: String}
   fromGlobal (g :: Global) = reverse $ map fromCompilerMessage g.sub.messages
 
 instance Show Message where
-  show msg = msg.text
+  show msg = show msg.pos ++ ": " ++ msg.text
 
 symbolVar :: Symbol -> Global -> String
 symbolVar SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 1
@@ -295,36 +294,34 @@ symbolClass symbol g = g.unpack symbol.name.getpack
 
 findSourceType :: String -> String -> StIO SourceType
 findSourceType src predefs = do
-  env <- getSTT
-  srcType <- calculateSourceTypeST src
-  StateT.put env -- reset state
-  case srcType of
-    Just ModuleSource -> return SourceType.ModuleSource
-    Just ExpressionSource -> return SourceType.ExpressionSource
-    otherwise -> do
-      srcType <- calculateSourceTypeST (buildScript src SourceType.DefinitionsSource predefs "T" "test")
-      StateT.put env -- reset state
-      case srcType of
-         Just ModuleSource -> return SourceType.DefinitionsSource
-         _ -> return SourceType.ExpressionSource
-
-calculateSourceTypeST :: String -> StIO (Maybe SourceType)
-calculateSourceTypeST src = do
+    initialState ← getSTT
     pw <- liftIO $ StringWriter.new () >>= StringWriter.printer
     changeSTT Global.{sub <- SubSt.{stderr=pw}}
     runpass (lexPass src, "lexical analysis")
     g <- getSTT
     if g.errors != 0
-      then return Nothing
+      then return SourceType.DefinitionsSource -- TODO: Should we just throw an error?
       else do
-        result <- liftStG $ F.pass (filter Token.noComment g.sub.toks.toList)
-        g <- getSTT
-        if g.errors != 0
-          then return Nothing
-          else case result of
-            Just (ModuleProgram _) -> return (Just SourceType.ModuleSource)
-            Just (ExpressionProgram _) -> return (Just SourceType.ExpressionSource)
-            _ -> return Nothing
+        StateT.put initialState
+        let tokens = filter noDocComment g.sub.toks.toList
+        case tokens of
+          (firstTok: rest) | firstTok.tokid == PACKAGE → return SourceType.ModuleSource
+          otherwise → isDefinitionOrExpr src predefs
+
+isDefinitionOrExpr src predefs = do
+  let defSrc = buildScript src SourceType.DefinitionsSource predefs "T" "test"
+  initialState ← getSTT
+  runpass (lexPass defSrc, "lexical analysis")
+  g <- getSTT
+  if g.errors != 0
+    then return SourceType.ExpressionSource
+    else do
+      liftStG $ F.pass (filter Token.noComment g.sub.toks.toList)
+      g <- getSTT
+      StateT.put initialState
+      if g.errors != 0
+        then return SourceType.ExpressionSource
+        else return SourceType.DefinitionsSource
 
 {-
 Compiler state with interpreter options
@@ -362,7 +359,7 @@ getEnv g q = g.find q >>= symEnv
       | otherwise = Nothing
 
 outlineSymbols :: Global -> [String]
-outlineSymbols g = map (show . label g) $ Util.symbols g.thisTab
+outlineSymbols g = map (Util.label g) $ Util.symbols g.thisTab
 
 newLine = maybe "\n" id $ System.getProperty "line.separator"
 
@@ -530,51 +527,7 @@ getSymbolType g sym
     | otherwise        = ""
 
 showSymbol :: Global -> Symbol -> String
-showSymbol g s = show $ label g s
-
-data Signature =
-  FuncSig { name :: String, typ :: String, doc :: Maybe String}
-  | DataSig { name :: String, typ :: String, doc :: Maybe String }
-  | TypeAliasSig { name :: String, typ :: String, doc :: Maybe String }
-  | InstanceSig { name :: String, doc :: Maybe String }
-  | ClassSig { name :: String, kind :: String, doc :: Maybe String }
-  | UnknownSig { name :: String, category :: String, doc :: Maybe String }
-
-instance Show Signature where
-  show (FuncSig name typ doc) = (showDoc doc) ++ "\n" ++ addParensForOperators name ++ " :: " ++ typ
-  show (DataSig name typ doc) = (showDoc doc) ++ "\ndata " ++ addParensForOperators name --++ " :: " ++ typ Commented for hoogle
-  show (TypeAliasSig name typ doc) = (showDoc doc) ++ "\ntype " ++ addParensForOperators name ++ " = " ++ typ
-  show (InstanceSig name doc) = (showDoc doc) ++ "\ninstance " ++ addParensForOperators name
-  show (ClassSig name kind doc) = (showDoc doc) ++ "\nclass " ++ addParensForOperators name --++ " :: " ++ kind
-  show (UnknownSig name category doc) = (showDoc doc) ++ "\n" ++ category ++ " " ++ addParensForOperators name
-
-private addParensForOperators s
-  | s !~ '\p{L}' = "(" ++ s ++ ")"
-  | otherwise = s
-
-private showDoc doc = maybe "" prefixCommentChars doc
-
-prefixCommentChars doc = "-- | " ++ (intercalate "\n-- " $ dropWhile (null . trim) $ lines doc)
-
-label ∷ Global → Symbol → Signature
-label g SymI{clas,typ, doc} = InstanceSig (nicer (instanceHead clas typ.rho) g) doc
-label g SymV{name,typ, doc} = FuncSig name.base (verbose g typ) doc
-label g SymD{name,typ, doc} = FuncSig name.base (verbose g typ) doc
-label g SymC{name,tau, doc} = ClassSig name.base (show tau.kind) doc
-label g SymT{name, nativ = Just n, pur, mutable, doc}
-    | pur       = DataSig name.base ("pure native " ++ n) doc
-    | mutable   = DataSig name.base ("mutable native " ++ n) doc
-    | otherwise = DataSig name.base ("native " ++ n) doc
-label g SymA{name,typ, doc} = TypeAliasSig name.base (typ.rho.nicer gspecial) doc
-    where
-        gspecial = g.{options <- _.{flags <- Flags.flagSet SPECIAL}}
-label g sym
-    | sym.{kind?}      = DataSig sym.name.base (show sym.kind) sym.doc
-    | sym.{alias?}     =
-      let f aliasSym = info.{name = sym.name.base} where
-            info = label g aliasSym
-      in maybe (UnknownSig sym.name.base (category sym g) sym.doc) f $ g.find sym.alias
-    | otherwise        = UnknownSig sym.name.base (category sym g) sym.doc
+showSymbol g sym = category sym g ++ " " ++ Util.label g sym
 
 getSymbols :: Symtab -> [Symbol]
 getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
