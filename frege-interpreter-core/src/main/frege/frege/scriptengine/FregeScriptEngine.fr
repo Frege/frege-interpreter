@@ -6,9 +6,14 @@ import frege.Prelude hiding (init)
 
 native module where {
 
+    private static final String FREGE_BINDINGS_KEY = "frege.scriptengine.bindings";
+    private static final String PRELUDE_SCRIPT_CLASS_NAME = "frege.scriptengine.PreludeScript";
+    private static final String PRELUDE_SCRIPT_KEY = "frege.scriptengine.preludeScript";
+
     public static class FregeScriptEngineFactory implements javax.script.ScriptEngineFactory {
 
       private static final java.util.List<String> NAMES = java.util.Arrays.asList("fr", "frege");
+
 
       @Override
       public String getEngineName() {
@@ -84,7 +89,7 @@ native module where {
 
     public JFregeScriptEngine(final javax.script.ScriptEngineFactory factory) {
         this.factory = factory;
-        frege.scriptengine.FregeScriptEngine.init(this, factory).apply(1).result().forced();
+        frege.scriptengine.FregeScriptEngine.init(this, factory).apply(1).result(). forced();
     }
 
     @Override
@@ -136,17 +141,18 @@ native module where {
 
     @Override
     public void put(final String key, final Object value) {
-    final String[] nameAndType = key.split("::");
-        final String name = nameAndType[0].trim();
+      final String[] nameAndType = key.split("::");
+      final String name = nameAndType[0].trim();
+
+      if (name.equals("import")) {
+        frege.scriptengine.FregeScriptEngine.addImport(this, context, value.toString()).apply(1).result().forced();
+      } else {
         final String type = nameAndType.length < 2 ? "a" : nameAndType[1].trim();
-      frege.scriptengine.FregeScriptEngine.put(this, context, key, value).apply(1).result().forced();
-      super.put(name, value);
+        frege.scriptengine.FregeScriptEngine.put(this, context, key, value).apply(1).result().forced();
+        super.put(name, value);
+      }
     }
-
   }
-
-  private static final String FREGE_BINDINGS_KEY = "frege.scriptengine.bindings";
-  private static final String PRELUDE_SCRIPT_CLASS_NAME = "frege.scriptengine.PreludeScript";
 
   public static Object jEvalSym(final javax.script.ScriptContext context,
                            final frege.interpreter.javasupport.InterpreterClassLoader classLoader,
@@ -253,7 +259,7 @@ eval script context = do
   evalResult script config context res newState
 
 evalResult :: String -> InterpreterConfig -> MutableIO ScriptContext -> InterpreterResult -> MutableIO InterpreterClassLoader -> IO (Maybe a)
-evalResult script config context res state =
+evalResult script config context res state = do
   case res of
     InterpreterResult.Success{sourceRepr=sourceRepr, compilerState=g} -> do
       case sourceRepr of
@@ -307,13 +313,27 @@ updateCurrentScript engine context name typ = do
       newConfig = config.{predefs=newPredefs}
   context.setAttribute configKey newConfig ScriptContext.engineScope
 
+addImport :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> IO ()
+addImport engine context imp = do
+  config <- getInterpreterConfig context
+  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
+  preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
+  let importScript = "\nimport " ++ imp ++ "\n"
+      preludeImport = "\nimport " ++ preludeScriptClassName ++ "\n"
+      withPreludeImport = config.predefs ++ "\n" ++ preludeImport ++ "\n" ++ importScript
+      withoutPreludeImport = const $ config.predefs ++ "\n" ++ importScript
+      newPredefs = maybe withPreludeImport withoutPreludeImport bindingsMaybe
+      newConfig = config.{predefs=newPredefs}
+      newPreludeScript = fromMaybe "" preludeScript ++ importScript
+  context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
+  context.setAttribute configKey newConfig ScriptContext.engineScope
+
 updatePreludeScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
 updatePreludeScript engine context name typName = do
-  config <- getInterpreterConfig context
   let typ = "FregeScriptEngineRef (" ++ typName ++ ")"
       newDef = String.format ("\n%1$sRef :: %2$s\n" ++ "!%1$sRef = IO.performUnsafe $ FregeScriptEngineRef.new ()\n") name typ
   preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
-  let newPreludeScript = (maybe "" id preludeScript) ++ config.predefs ++ "\n" ++ newDef
+  let newPreludeScript = fromMaybe "" preludeScript ++ "\n" ++ newDef
   context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
 
 updateBindings :: MutableIO ScriptEngine -> MutableIO ScriptContext -> a -> String -> IO ()
