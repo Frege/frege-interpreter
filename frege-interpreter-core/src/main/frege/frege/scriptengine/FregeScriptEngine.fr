@@ -271,10 +271,11 @@ evalResult script config context res state = do
               newConfig = config.{predefs<-updatePredefs}
           context.setAttribute configKey newConfig ScriptContext.engineScope
           return Nothing
-        Expression sym -> do
+        Expression sym | isVariable g sym -> do
           let className = symbolClass sym g
               varName = symbolVar sym g
           Just <$> evalSym context state className varName
+        Expression sym = return Nothing
     InterpreterResult.Failure messages -> error $ show messages
 
 compile :: MutableIO ScriptEngine -> String -> MutableIO ScriptContext -> IOMutable CompiledScript
