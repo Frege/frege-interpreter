@@ -38,13 +38,13 @@ subprojects {
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
-        fregeVersion = "3.23.450-SNAPSHOT"
+        fregeVersion = "3.24-7.30"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"
 
-    sourceCompatibility = 1.7
-    targetCompatibility = 1.7
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
 
     version = projectVersion
     group = groupName

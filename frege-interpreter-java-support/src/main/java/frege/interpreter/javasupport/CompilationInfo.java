@@ -1,65 +1,38 @@
 package frege.interpreter.javasupport;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
-import org.eclipse.jdt.core.compiler.CategorizedProblem;
-import org.eclipse.jdt.internal.compiler.CompilationResult;
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaFileObject;
+import javax.xml.stream.events.Attribute;
+import java.util.Locale;
 
 public class CompilationInfo {
 
-  private final List<CompilationResult> results;
-  private final Map<String, byte[]> classes;
-  private final ClassLoader classLoader;
+    private final boolean isSuccess;
+    private final DiagnosticCollector<JavaFileObject> diagnostics;
 
-  public CompilationInfo(final List<CompilationResult> results,
-      final Map<String, byte[]> classes,
-      final ClassLoader classLoader) {
-    this.results = Collections.unmodifiableList(results);
-    this.classes = Collections.unmodifiableMap(classes);
-    this.classLoader = classLoader;
-  }
-
-  public boolean isSuccess() {
-    for (final CompilationResult res : results) {
-      if (res.getProblems() != null) {
-        for (final CategorizedProblem problem : res.getProblems()) {
-          if (problem.isError()) {
-            return false;
-          }
-        }
-      }
+    public CompilationInfo(final boolean isSuccess,
+                           final DiagnosticCollector<JavaFileObject> diagnostics) {
+        this.isSuccess = isSuccess;
+        this.diagnostics = diagnostics;
     }
-    return true;
-  }
 
-  public String errorsAsString() {
-    final StringBuilder msgBuilder = new StringBuilder();
-    for (final CompilationResult res : results) {
-      if (res.getProblems() != null) {
-        for (final CategorizedProblem problem : res.getProblems()) {
-          if (problem.isError()) {
-            msgBuilder.append("Native error: ");
-            msgBuilder.append(problem.getOriginatingFileName());
-            msgBuilder.append(":");
-            msgBuilder.append(problem.getSourceLineNumber());
-            msgBuilder.append(": ");
-            msgBuilder.append(problem.getMessage());
-            msgBuilder.append("\n");
-          }
-        }
-      }
+    public boolean isSuccess() {
+        return isSuccess;
     }
-    return msgBuilder.toString();
-  }
 
-  public ClassLoader classLoader() {
-    return classLoader;
-  }
-
-  public Map<String, byte[]> classes() {
-    return classes;
-  }
+    public String errorsAsString() {
+        final StringBuilder msgs = new StringBuilder();
+        for (final Diagnostic<? extends JavaFileObject> diagnostic : diagnostics
+            .getDiagnostics()) {
+            final JavaFileObject source = diagnostic.getSource();
+            final String message = String.format("Error:%s[%s:%s]: %s\n",
+                source != null ? source.getName() : "<unknown source>",
+                diagnostic.getLineNumber(), diagnostic.getColumnNumber(),
+                diagnostic.getMessage(Locale.getDefault()));
+            msgs.append(message);
+        }
+        return msgs.toString();
+    }
 
 }

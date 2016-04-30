@@ -6,6 +6,10 @@ dependencies {
     testCompile("junit:junit:4.12")
 }
 
+compileFrege {
+    target = "1.7"
+}
+
 compileTestFrege {
     enabled = false
 }

@@ -32,6 +32,7 @@ import Compiler.passes.Imp (importClass)
 import Compiler.classes.Nice(Nice, category)
 import Compiler.common.Resolve as R
 import Compiler.common.Types as CommonTypes(instanceHead)
+import Compiler.types.Targets (java7)
 
 import Compiler.grammar.Lexer as L()
 import Compiler.grammar.Frege as F()
@@ -45,8 +46,10 @@ import Compiler.passes.Transdef()
 import Compiler.Classes()
 import Compiler.Typecheck as TC()
 import Compiler.Transform as TF()
+import Compiler.passes.LetUnroll as LU()
+import Compiler.passes.Strict    as SC()
 import Compiler.GenMeta   as GM()
-import Compiler.GenJava7  as G7()
+import Compiler.passes.GenCode()
 
 import Control.monad.Reader
 import Control.monad.trans.MonadIO
@@ -63,7 +66,7 @@ data InterpreterConfig = InterpreterConfig
   , useSandbox :: Bool
   } where
 
-  default = InterpreterConfig
+  initialState = InterpreterConfig
     { predefs = ""
     , compilerFlags = Flags.fromList [WARNINGS, HINTS, INLINE]
     , useSandbox = false
@@ -71,7 +74,7 @@ data InterpreterConfig = InterpreterConfig
 
 type InterpreterState = StateT (MutableIO InterpreterClassLoader) StIO
 
-data Interpreter result = Interpreter
+newtype Interpreter result = Interpreter
                           { un :: ReaderT InterpreterState InterpreterConfig result } where
 
   get :: Interpreter (MutableIO InterpreterClassLoader)
@@ -93,14 +96,17 @@ data Interpreter result = Interpreter
       s <- Interpreter.get
       Interpreter.put (f s)
 
-  run :: Interpreter result -> InterpreterConfig -> MutableIO InterpreterClassLoader -> IO (result, MutableIO InterpreterClassLoader)
+  run :: Interpreter result
+      -> InterpreterConfig
+      -> MutableIO InterpreterClassLoader
+      -> IO (result, MutableIO InterpreterClassLoader)
   run (Interpreter interpreter) config state = do
       global <- interpreterCompilerEnv state config.compilerFlags
       ((result, loader), newGlobal) <- StateT.run (StateT.run (Kleisli.run interpreter config) state) global
       return (result, loader)
 
 instance Monad Interpreter where
-  return = Interpreter . return
+  pure = Interpreter . pure
   (Interpreter r) >>= f = Interpreter $ r >>= g where
      g = Interpreter.un . f
 
@@ -111,6 +117,7 @@ instance MonadIO Interpreter where
 --- utility function to create 'Options' data structure
 createopts sp flags dir path prefix source = stdOptions.{
                                 source = source,
+                                target = java7,
                                 sourcePath = sp,
                                 flags,
                                 dir,
@@ -204,7 +211,7 @@ run :: String
 run src predefs steps = do
     scriptType <- findSourceType src predefs
     let varName = findUnusedVariableName freshVarPrefix (predefs ++ src)
-        source = buildScript src scriptType predefs "Console" varName
+        source = buildScript src scriptType predefs "frege.interpreter.Console" varName
     changeSTT Global.{gen <- GenSt.{printer = stdout}}    -- just to have no undefined value there
     forsome (steps source) runpass
     g <- getSTT
@@ -383,15 +390,18 @@ noDocComment Token{tokid} = tokid != COMMENT && tokid != DOCUMENTATION
 moduleDeclScript moduleName = "module " ++ moduleName ++ " where"
 variableDeclScript varName script = varName ++ " = \n" ++ (indent 2 script)
 
+intercalateNewLine :: [String] → String
+intercalateNewLine = fold (++) "" . intersperse "\n"
+
 buildScript script SourceType.DefinitionsSource predefs moduleName _ =
   if null predefs
     then (moduleDeclScript moduleName) ++ "\n" ++ script
-    else intercalate newLine [moduleDeclScript moduleName, predefs, script]
+    else intercalateNewLine [moduleDeclScript moduleName, predefs, script]
 
 buildScript script SourceType.ExpressionSource predefs moduleName varName =
   if null predefs
-    then intercalate newLine [moduleDeclScript moduleName, variableDeclScript varName script]
-    else intercalate newLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
+    then intercalateNewLine [moduleDeclScript moduleName, variableDeclScript varName script]
+    else intercalateNewLine [moduleDeclScript moduleName, predefs, variableDeclScript varName script]
 
 buildScript script SourceType.ModuleSource predefs _ _ = script
 
@@ -456,34 +466,36 @@ openPrinter pw = do
     return ("file", 1)
 
 javaSourcePasses jw = [
-    (liftStG TF.pass9,          "simplify expressions"),            -- TRACE9
-    (liftStG TF.pass8,          "globalize anonymous lambdas"),     -- TRACE8
-    (liftStG TF.pass10,         "strictness analysis"),             -- TRACES
-    (openPrinter jw,     "open file"),
-    (GM.genmeta,      "generate meta data"),   -- none
-    (G7.pass,         "generate java7 code")  -- TRACEG
-    ]
+  (liftStG TF.pass9,          "simplify expressions"),            -- TRACE9
+  (liftStG TF.pass8,          "globalize anonymous lambdas"),     -- TRACE8
+  (liftStG SC.pass,           "strictness analysis"),
+  (openPrinter jw,     "open file"),
+  (GM.genmeta,      "generate meta data"),   -- none
+  (GenCode.pass,         "generate java code")  -- TRACEG
+ ]
 
 javagenPasses jw javac = javaSourcePasses jw ++ [
     (javacPass javac jw, "run java compiler")
     ]
 
 typecheckPasses (config :: InterpreterConfig) src = [
-   (lexPass src, "lexer"),
-   (liftStG (iparsePass (transformDefs config)), "parser"),
-   (liftStG Fix.pass, "join definitions"),
-   (Imp.pass, "import packages"),
-   (liftStG (Classes.passI true), "verify imported instances"),
-   (liftStG Enter.pass, "enter definitions"),
-   (liftStG Fields.pass, "field definitions"),
-   (liftStG TypeAlias.pass, "process type aliases"),
-   (liftStG Instances.pass, "derive and enter instances"),
-   (Transdef.pass, "resolve names"),
-   (liftStG Classes.passC,          "verify class definitions"),        -- TRACE6
-   (liftStG $ Classes.passI false, "verify own instances"),            -- TRACE6
-   (liftStG TF.pass7,          "simplify lets"),                   -- TRACE7
-   (TC.pass,                   "type check"),                      -- TRACET, TRACEO
+  (lexPass src, "lexer"),
+  (liftStG (iparsePass (transformDefs config)), "parser"),
+  (liftStG Fix.pass, "join definitions"),
+  (Imp.pass, "import packages"),
+  (liftStG (Classes.passI true), "verify imported instances"),
+  (liftStG Enter.pass, "enter definitions"),
+  (liftStG Fields.pass, "field definitions"),
+  (liftStG TypeAlias.pass, "process type aliases"),
+  (liftStG derivePass, "derive and enter instances"),
+  (Transdef.pass, "resolve names"),
+  (liftStG Classes.passC,          "verify class definitions"),        -- TRACE6
+  (liftStG $ Classes.passI false,  "verify own instances"),            -- TRACE6
+  (liftStG LU.pass,           "simplify lets"),                   -- TRACE7
+  (TC.pass,                   "type check")                       -- TRACET, TRACEO
   ]
+
+derivePass = Instances.pass ()
 
 javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StIO (String, Int)
 javacPass compiler src = do
@@ -508,7 +520,7 @@ matching (_@DatDcl{name=x}) (_@DatDcl{name=y}) = x == y
 matching (_@JavDcl{name=x}) (_@JavDcl{name=y}) = x == y
 matching _ _ = false
 
-funcMatching d1 d2 = maybe false id $ funcEq <$> funbinding d1 <*> funbinding d2 where
+funcMatching d1 d2 = fromMaybe false $ funcEq <$> funbinding d1 <*> funbinding d2 where
   funcEq :: Token -> Token -> Bool
   funcEq t1 t2 = t1.tokid == t2.tokid && t1.value == t2.value
 
@@ -521,7 +533,7 @@ getSymbolType g SymC{name,tau} = show tau.kind
 getSymbolType g SymT{name, nativ = Just n, pur, mutable}
     | pur       = "pure native " ++ n
     | mutable   = "mutable native " ++ n
-    | otherwise = "native " ++ n            
+    | otherwise = "native " ++ n
 getSymbolType g sym
     | sym.{kind?}      = show sym.kind
     | otherwise        = ""
@@ -557,7 +569,12 @@ iparsePass f = do
         Just _ -> error "FATAL: Expected module"
         Nothing -> stio ("tokens", g.sub.toks.length)
 
-interpreterPreludeImport = ImpDcl {pos=Position.null, pack="frege.interpreter.PreludeInterpreter", as=Nothing, imports = linkAll}
+interpreterPreludeImport = ImpDcl {
+  pos = Position.null,
+  pack = "frege.interpreter.PreludeInterpreter",
+  as = Nothing,
+  imports = linkAll
+}
 
 preludeHidingImport = ImpDcl {
   pos = Position.null,
@@ -630,13 +647,11 @@ data InterpreterClassLoader = native frege.interpreter.javasupport.InterpreterCl
               | Mutable s (JMap String ByteArray) -> STMutable s InterpreterClassLoader
   native classes :: MutableIO InterpreterClassLoader -> IOMutable (JMap String ByteArray)
 
-instance Cloneable InterpreterClassLoader
-
 data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo where
   native isSuccess :: Mutable s JavaCompilationInfo -> ST s Bool
   native errorsAsString :: Mutable s JavaCompilationInfo -> ST s String
-  native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
-  native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArray)
+  --native classLoader :: MutableIO JavaCompilationInfo -> IO ClassLoader
+  -- native classes :: Mutable s JavaCompilationInfo -> STMutable s (JMap String ByteArray)
 
 type ByteArray = JArray Byte
 
@@ -652,13 +667,13 @@ data HashMap k v = native java.util.HashMap where
 pure native groupCount :: MatchResult -> Int
 
 native fieldValue frege.interpreter.javasupport.JavaUtils.fieldValue ::
-  String -> String -> MutableIO InterpreterClassLoader -> IO (Maybe a)
+  String -> String -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 native sandboxFieldValue frege.interpreter.javasupport.JavaUtils.sandboxFieldValue ::
-  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe a)
+  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 native fieldValueWithRuntime frege.interpreter.javasupport.JavaUtils.fieldValueWithRuntime ::
-  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe a)
+  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 pure native longToString Long.toString :: Long -> Int -> String
 

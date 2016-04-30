@@ -15,14 +15,24 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class JavaUtils {
 
-	public static Object fieldValue(final String className,
-			final String variableName, final InterpreterClassLoader loader) {
+    public static Object fieldValue(final String className,
+                                    final String variableName, final InterpreterClassLoader loader) {
         final Class<?> clazz;
         try {
             clazz = loader.loadClass(className);
             return clazz.getDeclaredField(variableName).get(null);
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public static String thunkToString(Object thunkString) {
+        if (thunkString instanceof frege.run8.Thunk) {
+            return ((frege.run8.Thunk<String>) thunkString).call();
+        } else if (thunkString instanceof frege.run7.Thunk) {
+            return ((frege.run7.Thunk<String>) thunkString).call();
+        } else {
+            return (String) thunkString;
         }
     }
 
@@ -41,11 +51,11 @@ public class JavaUtils {
     }
 
     public static Object fieldValueWithRuntime(final String className,
-                                                final String variableName,
-                                                final String stdinStr,
-                                                final StringWriter outWriter,
-                                                final StringWriter errWriter,
-                                                final InterpreterClassLoader loader) {
+                                               final String variableName,
+                                               final String stdinStr,
+                                               final StringWriter outWriter,
+                                               final StringWriter errWriter,
+                                               final InterpreterClassLoader loader) {
         prepareRuntime(stdinStr, outWriter, errWriter);
         return fieldValue(className, variableName, loader);
     }
@@ -60,9 +70,9 @@ public class JavaUtils {
     }
 
     public static <V> V sandbox(final FutureTask<V> task,
-                                    final long timeout,
-                                    final TimeUnit unit
-                                    ) {
+                                final long timeout,
+                                final TimeUnit unit
+    ) {
 
         final Thread thread = new Thread(task);
         final SecurityManager oldSecurityManager = System.getSecurityManager();
@@ -104,5 +114,3 @@ public class JavaUtils {
     }
 
 }
-
-

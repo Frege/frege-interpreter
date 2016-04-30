@@ -60,7 +60,7 @@ public class FregeScriptEngineTest {
 
     @Test
     public void testBinding() throws ScriptException {
-        frege.put("bar", new BigInteger("12312332142343244"));
+        frege.put("bar :: Integer", new BigInteger("12312332142343244"));
         final Object actual = frege.eval("bar + 3.big");
         final Object expected = new BigInteger("12312332142343247");
         assertEquals(expected, actual);
