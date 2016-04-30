@@ -7,7 +7,7 @@ import frege.Prelude hiding(<+>, Reader)
 import Lib.PP(msgdoc, text, <+>)
 import Control.monad.State
 import Data.TreeMap (TreeMap Tree, values)
-import Data.List (sort, uniq, intercalate, nubBy, groupBy, sortBy, isPrefixOf)
+import Data.List (sort, uniq, intersperse, nubBy, groupBy, sortBy, isPrefixOf)
 
 import Compiler.enums.Flags
 import Compiler.types.Global hiding (Message, Severity, liftIO)
