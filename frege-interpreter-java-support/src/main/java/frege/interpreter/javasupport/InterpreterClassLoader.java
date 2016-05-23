@@ -11,16 +11,15 @@ public class InterpreterClassLoader extends URLClassLoader {
     private final Map<String, byte[]> classes;
 
     public InterpreterClassLoader() {
-        this(Thread.currentThread().getContextClassLoader(), new HashMap<String, byte[]>());
+        this(Thread.currentThread().getContextClassLoader(), new HashMap<>());
     }
-
 
     public InterpreterClassLoader(final Map<String, byte[]> classes) {
         this(Thread.currentThread().getContextClassLoader(), classes);
     }
 
     public InterpreterClassLoader(final ClassLoader parent) {
-        this(parent, new HashMap<String, byte[]>());
+        this(parent, new HashMap<>());
     }
 
     public InterpreterClassLoader(final ClassLoader parent,
@@ -35,9 +34,12 @@ public class InterpreterClassLoader extends URLClassLoader {
         byte[] bytecode = classes.get(className);
         if (bytecode == null)
             bytecode = classes.get(className.replace('.', '/'));
-        return (bytecode != null)
-               ? defineClass(className, bytecode, 0, bytecode.length)
-               : super.findClass(className);
+
+        if (bytecode != null) return defineClass(className, bytecode, 0, bytecode.length);
+        else {
+            final Class<?> clazz = super.findClass(className);
+            return clazz;
+        }
     }
 
     @Override

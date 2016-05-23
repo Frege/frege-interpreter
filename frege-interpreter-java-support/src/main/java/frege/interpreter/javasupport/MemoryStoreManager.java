@@ -28,11 +28,13 @@ public final class MemoryStoreManager extends
 	private static final String JAVA_EXTENSION = ".java";
 	private final Map<String, MemoryJavaClass> byteCodeMap;
 	private final Map<URI, JavaFileObject> sourceMap;
+	private final InterpreterClassLoader classLoader;
 
 	public MemoryStoreManager(final JavaFileManager fileManager,
-							  final Map<String, byte[]> byteCodeMap) {
+							  final InterpreterClassLoader classLoader) {
 		super(fileManager);
-		this.byteCodeMap = toMemoryJavaClassMap(byteCodeMap);
+		this.classLoader = classLoader;
+		this.byteCodeMap = toMemoryJavaClassMap(classLoader.classes());
 		sourceMap = new HashMap<>();
 	}
 
@@ -78,8 +80,6 @@ public final class MemoryStoreManager extends
 		for (final JavaFileObject file : result) {
 			files.add(file);
 		}
-        /*System.out.printf("listing %s, %s, %s, %s: %s\n",
-            location, packageName, kinds, recurse, files);*/
         return files;
 	}
 
@@ -164,13 +164,13 @@ public final class MemoryStoreManager extends
 	public void close() throws IOException {
 	}
 
-	public InterpreterClassLoader getClassLoader() {
+	InterpreterClassLoader getClassLoader() {
 		Collection<MemoryJavaClass> bytecodes = byteCodeMap.values();
 		Map<String, byte[]> bytecodeMap = new HashMap<>();
         for (MemoryJavaClass memoryJavaClass: bytecodes) {
             bytecodeMap.put(memoryJavaClass.getName(), memoryJavaClass.getByteCode());
         }
-		return new InterpreterClassLoader(bytecodeMap);
+		return new InterpreterClassLoader(classLoader.getParent(), bytecodeMap);
 	}
 
 	@Override

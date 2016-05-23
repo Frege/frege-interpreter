@@ -23,7 +23,7 @@ import Compiler.enums.TokenID
 import Compiler.types.Packs
 import Compiler.types.Positions
 import Compiler.types.Symbols
-import Compiler.types.External(KindA, defEA)
+import Compiler.types.External (defEA)
 import Compiler.types.NSNames
 import Compiler.types.QNames
 import Compiler.types.SNames
@@ -45,7 +45,8 @@ import Compiler.passes.Instances()
 import Compiler.passes.Transdef()
 import Compiler.Classes()
 import Compiler.Typecheck as TC()
-import Compiler.Transform as TF()
+import Compiler.passes.GlobalLam as GL()
+import Compiler.passes.Easy as EA()
 import Compiler.passes.LetUnroll as LU()
 import Compiler.passes.Strict    as SC()
 import Compiler.GenMeta   as GM()
@@ -219,7 +220,7 @@ run src predefs steps = do
     if g.errors == 0
       then case scriptType of
                 ModuleSource -> return . Just $ SourceInfo.Module $ className g
-                DefinitionsSource -> return . Just $ SourceInfo.Definitions (getSymbols g.thisTab)
+                DefinitionsSource -> return . Just $ SourceInfo.Definitions (getSymbols g g.thisTab)
                 ExpressionSource -> return $ SourceInfo.Expression <$> listToMaybe generatedSym
       else return Nothing
 
@@ -352,9 +353,9 @@ browseSymbols s = do
         g <- getSTT
         let resolveSName = do
                             qNames <- liftStG $ sNameToQName (createSName s)
-                            let qNameSyms q = maybe [] getSymbols $ getEnv g q
+                            let qNameSyms q = maybe [] (getSymbols g) $ getEnv g q
                             return $ qNames >>= qNameSyms
-            resolvePackage d p = maybe d (return . getSymbols) $ g.packages.lookup p
+            resolvePackage d p = maybe d (return . (getSymbols g)) $ g.packages.lookup p
             resolveNSPackage d = maybe d (resolvePackage d) $ g.namespaces.lookup (NSX s)
         resolvePackage (resolveNSPackage resolveSName) p
 
@@ -466,8 +467,8 @@ openPrinter pw = do
     return ("file", 1)
 
 javaSourcePasses jw = [
-  (liftStG TF.pass9,          "simplify expressions"),            -- TRACE9
-  (liftStG TF.pass8,          "globalize anonymous lambdas"),     -- TRACE8
+  (liftStG EA.pass,          "simplify expressions"),            -- TRACE9
+  (liftStG GL.pass,          "globalize anonymous lambdas"),     -- TRACE8
   (liftStG SC.pass,           "strictness analysis"),
   (openPrinter jw,     "open file"),
   (GM.genmeta,      "generate meta data"),   -- none
@@ -541,23 +542,23 @@ getSymbolType g sym
 showSymbol :: Global -> Symbol -> String
 showSymbol g sym = category sym g ++ " " ++ Util.label g sym
 
-getSymbols :: Symtab -> [Symbol]
-getSymbols tab = (sortBy positionAndName • filter wanted • values) tab
+getSymbols :: Global → Symtab → [Symbol]
+getSymbols g tab = (sortBy positionAndName • filter wanted • values) tab
     where
         positionAndName a b = case Symbol.pos a <=> Symbol.pos b of
                                     Eq -> comparing (QName.base • Symbol.name) a b
                                     ne -> ne
         wanted :: Symbol -> Bool
         wanted sym
-            | sym.{alias?}                       = true
+            | sym.{alias?}                       = false
             | Local{} <- sym.name                = false
-            -- sym.vis == Private                 = false
+            -- sym.vis == Private                = false
             | sym.name.base ~ ´^(chg|upd|has|let|anon|lc)\$´ = false
             | otherwise                          = true
 
 
 iparsePass f = do
-    g       <- getST
+    g      <- getST
     result <- F.pass (filter Token.noComment g.sub.toks.toList)
     case result of
         Just (ModuleProgram (packname, defs, doc)) -> do
@@ -636,8 +637,7 @@ showThrowableCause' depth t = maybe (showNative t) (showThrowableCause' (pred de
 -- Native Definitions
 
 data MemoryJavaCompiler = native frege.interpreter.javasupport.MemoryJavaCompiler where
-  native new :: Mutable s (JMap String ByteArray) -> STMutable s MemoryJavaCompiler
-              | Mutable s InterpreterClassLoader -> STMutable s MemoryJavaCompiler
+  native new :: Mutable s InterpreterClassLoader -> STMutable s MemoryJavaCompiler
   native compile :: Mutable s MemoryJavaCompiler -> String -> String -> STMutable s JavaCompilationInfo
   native classLoader :: Mutable s MemoryJavaCompiler ->  STMutable s InterpreterClassLoader
 
@@ -645,6 +645,7 @@ data InterpreterClassLoader = native frege.interpreter.javasupport.InterpreterCl
   native new :: () -> STMutable s InterpreterClassLoader
               | ClassLoader -> IOMutable InterpreterClassLoader
               | Mutable s (JMap String ByteArray) -> STMutable s InterpreterClassLoader
+              | ClassLoader → MutableIO (JMap String ByteArray) -> IOMutable InterpreterClassLoader
   native classes :: MutableIO InterpreterClassLoader -> IOMutable (JMap String ByteArray)
 
 data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo where

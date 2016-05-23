@@ -20,19 +20,19 @@ public class JavaUtils {
         final Class<?> clazz;
         try {
             clazz = loader.loadClass(className);
-            return clazz.getDeclaredField(variableName).get(null);
+            return unwrapThunk(clazz.getDeclaredField(variableName).get(null));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static String thunkToString(Object thunkString) {
-        if (thunkString instanceof frege.run8.Thunk) {
-            return ((frege.run8.Thunk<String>) thunkString).call();
-        } else if (thunkString instanceof frege.run7.Thunk) {
-            return ((frege.run7.Thunk<String>) thunkString).call();
+    public static Object unwrapThunk(Object possibleThunk) {
+        if (possibleThunk instanceof frege.run8.Thunk) {
+            return ((frege.run8.Thunk<?>) possibleThunk).call();
+        } else if (possibleThunk instanceof frege.run7.Thunk) {
+            return ((frege.run7.Thunk<?>) possibleThunk).call();
         } else {
-            return (String) thunkString;
+            return possibleThunk;
         }
     }
 
