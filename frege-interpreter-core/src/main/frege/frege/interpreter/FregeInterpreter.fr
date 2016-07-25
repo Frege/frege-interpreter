@@ -14,6 +14,7 @@ import Compiler.types.Global hiding (Message, Severity, liftIO)
 import Compiler.types.Global (Message CompilerMessage, Severity(), SubSt, GenSt)
 import Compiler.common.Desugar hiding (Program)
 import Compiler.common.Desugar (Program (Module ModuleProgram, Expression ExpressionProgram))
+import Compiler.common.JavaName (javaName)
 import Compiler.types.SourceDefinitions
 import Compiler.common.CompilerOptions (standardGlobal, stdOptions, getOpts, theClassLoader, pathSep, ourPath)
 import Compiler.common.Errors as E()
@@ -25,6 +26,7 @@ import Compiler.types.Positions
 import Compiler.types.Symbols
 import Compiler.types.External (defEA)
 import Compiler.types.NSNames
+import Compiler.types.JNames
 import Compiler.types.QNames
 import Compiler.types.SNames
 import Compiler.types.Types
@@ -293,7 +295,7 @@ instance Show Message where
 symbolVar :: Symbol -> Global -> String
 symbolVar SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 1
 symbolVar SymL{alias, name} g = maybe (error $ "Not found: " ++ show name) (flip symbolVar g) $ g.find alias
-symbolVar symbol g = symbol.name.base
+symbolVar symbol g = JName.base $ javaName g symbol.name
 
 symbolClass :: Symbol -> Global -> String
 symbolClass SymV{nativ} g | Just nativSig <- nativ = elemAt (split nativSig "\\.") 0

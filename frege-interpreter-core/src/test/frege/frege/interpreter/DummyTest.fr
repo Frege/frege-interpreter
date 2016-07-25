@@ -1,4 +1,0 @@
-module frege.interpreter.DummyTest where
-
-noop :: () -> ()
-noop x = ()

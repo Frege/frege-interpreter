@@ -123,8 +123,8 @@ public class FregeScriptEngineTest {
     public void testOperators() throws ScriptException {
         frege.eval("infix 1 `³`");
         frege.eval("(x³) = x^3");
-        final Object expected = frege.eval("(2³)");
-        final Object actual = 8;
+        final Object actual = frege.eval("(2³)");
+        final Object expected = 8;
         assertEquals(expected, actual);
     }
 
@@ -132,29 +132,37 @@ public class FregeScriptEngineTest {
     public void testImportOperators() throws ScriptException {
         frege.eval("import Data.Monoid");
         frege.eval("import frege.data.wrapper.Num");
-        final Object expected = frege.eval("Sum.unwrap $ Sum 1 <> Sum 0");
-        final Object actual = 1;
+        final Object actual = frege.eval("Sum.unwrap $ Sum 1 <> Sum 0");
+        final Object expected = 1;
         assertEquals(expected, actual);
     }
 
     @Test
     public void testTypeAnnotation() throws ScriptException {
-        final Object expected = frege.eval("one + one :: Int");
-        final Object actual = 2;
+        final Object actual = frege.eval("one + one :: Int");
+        final Object expected = 2;
         assertEquals(expected, actual);
     }
 
     @Test
     public void testWhere() throws ScriptException {
-        final Object expected = frege.eval("x + 3 where x = 5");
-        final Object actual = 8;
+        final Object actual = frege.eval("x + 3 where x = 5");
+        final Object expected = 8;
         assertEquals(expected, actual);
     }
 
     @Test
     public void testLet() throws ScriptException {
-        final Object expected = frege.eval("let x = 5 in x + 3");
-        final Object actual = 8;
+        final Object actual = frege.eval("let x = 5 in x + 3");
+        final Object expected = 8;
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testTickInName() throws ScriptException {
+        frege.eval("conanOBrien' = \"It's a-me, Conan O'Brien!\"");
+        final Object actual = frege.eval("conanOBrien'");
+        final Object expected = "It's a-me, Conan O'Brien!";
         assertEquals(expected, actual);
     }
 }
