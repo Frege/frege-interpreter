@@ -3,6 +3,7 @@ package frege.interpreter.scriptengine;
 import org.junit.Before;
 import org.junit.Test;
 
+import javax.script.Bindings;
 import javax.script.Compilable;
 import javax.script.CompiledScript;
 import javax.script.ScriptEngine;
@@ -10,6 +11,7 @@ import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 import java.math.BigInteger;
 
+import static javax.script.ScriptContext.ENGINE_SCOPE;
 import static org.junit.Assert.assertEquals;
 
 public class FregeScriptEngineTest {
@@ -164,5 +166,18 @@ public class FregeScriptEngineTest {
         final Object actual = frege.eval("conanOBrien'");
         final Object expected = "It's a-me, Conan O'Brien!";
         assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testRebinding() throws ScriptException {
+        Bindings bindings = frege.getBindings(ENGINE_SCOPE);
+        bindings.put("bar :: Integer", new BigInteger("12312332142343244"));
+        final Object actual1 = frege.eval("bar + 3.big");
+        final Object expected1 = new BigInteger("12312332142343247");
+        bindings.put("bar :: String", "hello ");
+        final Object actual2 = frege.eval("bar ++ \"world\"");
+        final Object expected2 = "hello world";
+        assertEquals(expected1, actual1);
+        assertEquals(expected2, actual2);
     }
 }
