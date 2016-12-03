@@ -82,12 +82,49 @@ native module where {
 
     }
 
+    private static class FregeBindings extends javax.script.SimpleBindings {
+
+      @Override
+      public Object put(String key, Object value) {
+        checkKey(key);
+        String existingKey = findExistingVariable(key);
+        if (existingKey != null) {
+          remove(existingKey);
+        }
+        return super.put(key, value);
+      }
+
+      private String findExistingVariable(String key) {
+        String keyName = getVariableName(key);
+        for (String thatKeyName: keySet()) {
+          if (getVariableName(thatKeyName).equals(keyName)) {
+            return thatKeyName;
+          }
+        }
+        return null;
+      }
+
+      private String getVariableName(String key) {
+        return key.split("::")[0].trim();
+      }
+
+      private void checkKey(Object key) {
+        if (key == null) {
+            throw new NullPointerException("key can not be null");
+        }
+        if (key.equals("")) {
+            throw new IllegalArgumentException("key can not be empty");
+        }
+      }
+    }
+
     public static class JFregeScriptEngine extends javax.script.AbstractScriptEngine implements
       javax.script.Compilable {
 
     private final javax.script.ScriptEngineFactory factory;
 
     public JFregeScriptEngine(final javax.script.ScriptEngineFactory factory) {
+        super(new FregeBindings());
         this.factory = factory;
         frege.prelude.PreludeBase.TST.run(
           frege.scriptengine.FregeScriptEngine.init(this, factory)).call();
@@ -96,6 +133,11 @@ native module where {
     @Override
     public Object eval(final String script, final javax.script.ScriptContext context)
         throws javax.script.ScriptException {
+        frege.prelude.PreludeBase.TST.performUnsafe(
+            frege.scriptengine.FregeScriptEngine.removeBindingVars(this, context)).call();
+
+        bindVarsAndLoadPrelude();
+
         Object res = frege.prelude.PreludeBase.TST.performUnsafe(
           frege.scriptengine.FregeScriptEngine.eval(script, context)).call();
         if (res instanceof frege.prelude.PreludeBase.TMaybe) {
@@ -103,23 +145,15 @@ native module where {
             if (frege.prelude.Maybe.isJust(maybe)) {
                 return unwrapThunk(frege.prelude.Maybe.unJust(maybe));
             }
-
         }
         return null;
     }
 
     @Override
-    public Object eval(final java.io.Reader reader, final javax.script.ScriptContext context) {
+    public Object eval(final java.io.Reader reader, final javax.script.ScriptContext context)
+      throws javax.script.ScriptException {
       String script = new java.util.Scanner(reader).useDelimiter("\\A").next();
-      Object res = frege.prelude.PreludeBase.TST.performUnsafe(
-        frege.scriptengine.FregeScriptEngine.eval(script, context)).call();
-      if (res instanceof frege.prelude.PreludeBase.TMaybe) {
-            frege.prelude.PreludeBase.TMaybe maybe = (frege.prelude.PreludeBase.TMaybe) res;
-            if (frege.prelude.Maybe.isJust(maybe)) {
-                return unwrapThunk(frege.prelude.Maybe.unJust(maybe));
-            }
-        }
-        return null;
+      return eval(script, context);
     }
 
     @Override
@@ -144,20 +178,35 @@ native module where {
         frege.scriptengine.FregeScriptEngine.compileReader(this, reader, context)).call();
     }
 
+    private void bindVariable(String key, Object value) {
+          final String[] nameAndType = key.split("::");
+        final String name = nameAndType[0].trim();
+
+        if (name.equals("import")) {
+          frege.prelude.PreludeBase.TST.performUnsafe(
+            frege.scriptengine.FregeScriptEngine.addImport(this, context, value.toString())).call();
+        } else {
+          final String type = nameAndType.length < 2 ? "a" : nameAndType[1].trim();
+          frege.prelude.PreludeBase.TST.performUnsafe(
+            frege.scriptengine.FregeScriptEngine.put(this, context, key, value)).call();
+        }
+    }
+
+    private void bindVarsAndLoadPrelude() {
+      java.util.Map<String, Object> bindings = getBindings(javax.script.ScriptContext.ENGINE_SCOPE);
+      if (hasVars(bindings)) {
+        for (java.util.Map.Entry<String, Object> entry: new java.util.HashSet<>(bindings.entrySet())) {
+          if (isUserBindingVar(entry.getKey()))
+            bindVariable(entry.getKey(), entry.getValue());
+        }
+        frege.prelude.PreludeBase.TST.performUnsafe(
+          frege.scriptengine.FregeScriptEngine.loadScriptingPrelude(context)).call();
+      }
+    }
+
     @Override
     public void put(final String key, final Object value) {
-      final String[] nameAndType = key.split("::");
-      final String name = nameAndType[0].trim();
-
-      if (name.equals("import")) {
-        frege.prelude.PreludeBase.TST.performUnsafe(
-          frege.scriptengine.FregeScriptEngine.addImport(this, context, value.toString())).call();
-      } else {
-        final String type = nameAndType.length < 2 ? "a" : nameAndType[1].trim();
-        frege.prelude.PreludeBase.TST.performUnsafe(
-          frege.scriptengine.FregeScriptEngine.put(this, context, key, value)).call();
-        super.put(name, value);
-      }
+      getBindings(javax.script.ScriptContext.ENGINE_SCOPE).put(key, value);
     }
   }
 
@@ -176,27 +225,43 @@ native module where {
                            final String className,
                            final String varName) throws javax.script.ScriptException {
       final Object res;
-      java.util.Map<String, Object> bindings = (java.util.Map<String, Object>) context.getAttribute(FREGE_BINDINGS_KEY);
+      java.util.Map<String, Object> bindings = context.getBindings(javax.script.ScriptContext.ENGINE_SCOPE);
       try {
-          if (bindings != null && !bindings.isEmpty()) {
+          if (bindings != null && hasVars(bindings)) {
               Class<?> preludeClass = classLoader.loadClass(PRELUDE_SCRIPT_CLASS_NAME);
               injectValues(bindings, preludeClass);
           }
           res = frege.interpreter.javasupport.JavaUtils.fieldValue(className, varName, classLoader);
-      } catch (Throwable throwable) {
-          throw new javax.script.ScriptException(throwable.toString());
+      } catch (Exception exception) {
+          throw new javax.script.ScriptException(exception);
       }
 
       return res;
+  }
+
+  private static boolean hasVars(java.util.Map<String, Object> bindings) {
+    if (bindings == null) return false;
+    for (final java.util.Map.Entry<String, Object> entry: bindings.entrySet()) {
+          if (isUserBindingVar(entry.getKey())) {
+            return true;
+          }
+    }
+    return false;
+  }
+
+  private static boolean isUserBindingVar(String varName) {
+    return !varName.startsWith("frege.scriptengine.") && !varName.endsWith("fregeScriptEngineVar");
   }
 
   public static void injectValues(final java.util.Map<String, Object> bindings,
 	    final Class<?> clazz) {
       try {
         for (final java.util.Map.Entry<String, Object> entry: bindings.entrySet()) {
-          final java.lang.reflect.Field field = clazz.getDeclaredField(entry.getKey());
-          final Ref ref = (Ref) field.get(null);
-          ref.set(entry.getValue());
+          if (entry.getKey().endsWith("fregeScriptEngineVar")) {
+            final java.lang.reflect.Field field = clazz.getDeclaredField(entry.getKey());
+            final Ref ref = (Ref) field.get(null);
+            ref.set(entry.getValue());
+          }
         }
       } catch (final Exception e) {
         throw new RuntimeException(e);
@@ -309,68 +374,72 @@ compileReader !engine !reader !context = do
   lines <- bufReader.getLines
   compile engine (fold (++) "" $ intersperse "\n" lines) context
 
-put :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> Object -> IO (Maybe Object)
+put :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> Object -> IO ()
 put !engine !context !key !value = do
   let xs = map trim . toList $ split key "::"
       f name typ = do
-                    updateCurrentScript engine context name typ
+                    bindVariable engine context name typ
                     updatePreludeScript engine context name typ
                     updateBindings engine context value name
-                    loadScriptingPrelude context
   case xs of
     (name: typ: _) -> f name typ
     (name: _) -> f name "a"
-    _ -> return Nothing
+    _ -> pure ()
 
-updateCurrentScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
-updateCurrentScript engine context name typ = do
+removeBindingVars :: MutableIO ScriptEngine -> MutableIO ScriptContext -> IO ()
+removeBindingVars !engine !context = do
   config <- getInterpreterConfig context
-  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
-  let newScript = String.format "\n%1$s :: %2$s\n%1$s = FregeScriptEngineRef.get %3$s" name typ (name ++ "Ref")
-      preludeImport = "\nimport " ++ preludeScriptClassName ++ "\n"
-      newPredefs = maybe (config.predefs ++ "\n" ++ preludeImport ++ "\n" ++ newScript) (const $ config.predefs ++ "\n" ++ newScript) bindingsMaybe
+  preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
+  let newPreludeScript = unlines . filter (not . isVarDef) . lines $ fromMaybe "" (asString <$> preludeScript)
+      newPredefs = unlines $ filter (not . isVarDef) $ lines config.predefs
+      newConfig = config.{predefs=newPredefs}
+      isVarDef line = line.contains "fregeScriptEngineVar"
+  context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
+  context.setAttribute configKey newConfig ScriptContext.engineScope
+
+bindVariable :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
+bindVariable engine context name typ = do
+  config <- getInterpreterConfig context
+  let newScript = String.format "\n%1$s :: %2$s--fregeScriptEngineVar\n%1$s = FregeScriptEngineRef.get %3$s" name typ
+                    (name ++ "fregeScriptEngineVar")
+  updateCurrentScript engine context newScript
+
+updateCurrentScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> IO ()
+updateCurrentScript engine context script = do
+  config <- getInterpreterConfig context
+  let importIfNecessary = if config.predefs.contains preludeImport then "" else preludeImport ++ "\n"
+      newPredefs = config.predefs ++ "\n" ++ importIfNecessary ++ script
       newConfig = config.{predefs=newPredefs}
   context.setAttribute configKey newConfig ScriptContext.engineScope
 
 addImport :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> IO ()
 addImport !engine !context !imp = do
   config <- getInterpreterConfig context
-  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
   preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
   let importScript = "\nimport " ++ imp ++ "\n"
-      preludeImport = "\nimport " ++ preludeScriptClassName ++ "\n"
-      withPreludeImport = config.predefs ++ "\n" ++ preludeImport ++ "\n" ++ importScript
-      withoutPreludeImport = const $ config.predefs ++ "\n" ++ importScript
-      newPredefs = maybe withPreludeImport withoutPreludeImport bindingsMaybe
-      newConfig = config.{predefs=newPredefs}
       newPreludeScript = fromMaybe "" (fmap asString preludeScript) ++ importScript
   context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
-  context.setAttribute configKey newConfig ScriptContext.engineScope
+  updateCurrentScript engine context importScript
 
 updatePreludeScript :: MutableIO ScriptEngine -> MutableIO ScriptContext -> String -> String -> IO ()
 updatePreludeScript engine context name typName = do
   let typ = "FregeScriptEngineRef (" ++ typName ++ ")"
-      newDef = String.format ("\n%1$sRef :: %2$s\n" ++ "!%1$sRef = IO.performUnsafe $ FregeScriptEngineRef.new ()\n") name typ
+      newDef = String.format ("\n%1$s :: %2$s\n" ++ "!%1$s = IO.performUnsafe $ FregeScriptEngineRef.new ()\n")
+                 (name ++ "fregeScriptEngineVar") typ
   preludeScript <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
   let newPreludeScript = fromMaybe "" (fmap asString preludeScript) ++ "\n" ++ newDef
   context.setAttribute fregePreludeScriptKey newPreludeScript ScriptContext.engineScope
 
 updateBindings :: MutableIO ScriptEngine -> MutableIO ScriptContext -> Object -> String -> IO ()
 updateBindings engine context value name = do
-  bindingsMaybe <- context.getAttribute fregeBindingsKey ScriptContext.engineScope
-  let newBindings :: IOMutable (JMap String Object)
-      newBindings = do
-                      m <- HashMap.new ()
-                      context.setAttribute fregeBindingsKey m ScriptContext.engineScope
-                      return m
-  bindings <- maybe newBindings asMapStringObject bindingsMaybe
-  bindings.put (name ++ "Ref") value
+  bindings ← context.getBindings ScriptContext.engineScope
+  bindings.put (name ++ "fregeScriptEngineVar") value
   return ()
 
-loadScriptingPrelude :: MutableIO ScriptContext -> IO (Maybe Object)
-loadScriptingPrelude context = do
+loadScriptingPrelude :: MutableIO ScriptContext -> IO ()
+loadScriptingPrelude !context = do
   scriptMaybe <- context.getAttribute fregePreludeScriptKey ScriptContext.engineScope
-  maybe (return Nothing) (\script -> eval (asString script) context) scriptMaybe
+  maybe (pure ()) (\script -> eval (asString script) context >> pure ()) scriptMaybe
 
 getInterpreterState :: Mutable s ScriptContext -> STMutable s InterpreterClassLoader
 getInterpreterState context = do
@@ -393,6 +462,11 @@ init !engine !factory = do
 native getContext :: Mutable s ScriptEngine -> STMutable s ScriptContext
 
 data ScriptEngine = native javax.script.ScriptEngine
+
+data Bindings = native javax.script.Bindings where
+  native get :: Mutable s Bindings → String → ST s (Maybe Object)
+  native put :: Mutable s Bindings → String → a → ST s ()
+
 data ScriptEngineFactory = native javax.script.ScriptEngineFactory
 data ScriptException = native javax.script.ScriptException
 derive Exceptional ScriptException
@@ -403,10 +477,12 @@ data ScriptContext = native javax.script.ScriptContext where
                        | Mutable s ScriptContext -> String -> Int -> ST s (Maybe Object)
 
   native setAttribute :: Mutable s ScriptContext -> String -> a -> Int -> ST s ()
+  native getBindings :: Mutable s ScriptContext → Int → STMutable s Bindings
 
 data CompiledScript = native javax.script.CompiledScript
 
 pure native asString "(String)" :: a → String
+
 pure native asInterpreterConfig "(frege.interpreter.FregeInterpreter.TInterpreterConfig)" :: a → InterpreterConfig
 native asInterpreterClassLoader "(frege.interpreter.javasupport.InterpreterClassLoader)" :: a → STMutable s InterpreterClassLoader
 native asMapStringObject "(java.util.Map)" :: a → IOMutable (JMap String Object)
@@ -419,6 +495,7 @@ classLoaderKey = "frege.scriptengine.classloader"
 configKey = "frege.scriptengine.currentDefs"
 preludeScriptClassName = "frege.scriptengine.PreludeScript"
 fregeBindingsKey = "frege.scriptengine.bindings"
+preludeImport = "import " ++ preludeScriptClassName
 
 preludeDef =
   "module " ++ preludeScriptClassName ++ " where\n"
