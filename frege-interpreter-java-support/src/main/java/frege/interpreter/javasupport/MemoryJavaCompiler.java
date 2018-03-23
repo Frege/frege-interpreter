@@ -43,7 +43,12 @@ public class MemoryJavaCompiler {
 
     public CompilationInfo compile(final Map<String, CharSequence> sources) {
         // TODO The version is hardcoded as the Frege compiler for Java 8 is still not available on Maven central
-        final String version = "1.7"; //getJvmVersion();
+    	/*
+    	 * Sorry, but I need a repl where I can just point to the latest compiler.
+    	 *                                                -- Ingo
+    	 */
+    	
+        final String version = "1.8"; //getJvmVersion();
         List<String> options = new ArrayList<>();
         options.add("-source");
         options.add(version);
