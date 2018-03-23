@@ -34,7 +34,7 @@ import Compiler.passes.Imp (importClass)
 import Compiler.classes.Nice(Nice, category)
 import Compiler.common.Resolve as R
 import Compiler.common.Types as CommonTypes(instanceHead)
-import Compiler.types.Targets (java7)
+import Compiler.types.Targets (Target)
 
 import Compiler.grammar.Lexer as L()
 import Compiler.grammar.Frege as F()
@@ -120,7 +120,7 @@ instance MonadIO Interpreter where
 --- utility function to create 'Options' data structure
 createopts sp flags dir path prefix source = stdOptions.{
                                 source = source,
-                                target = java7,
+                                target = Target{major=1, minor=8},
                                 sourcePath = sp,
                                 flags,
                                 dir,

@@ -59,7 +59,8 @@ subprojects {
     }
 
     dependencies {
-        compile "org.frege-lang:frege:$fregeVersion"
+		compile files('/home/ingo/Frege/frege/dist/frege3.24-latest.jar')
+		runtime files('/home/ingo/Frege/frege/dist/frege3.24-latest.jar')
     }
 
     nexusStaging {
