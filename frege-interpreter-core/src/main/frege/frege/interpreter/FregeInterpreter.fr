@@ -645,9 +645,9 @@ data MemoryJavaCompiler = native frege.interpreter.javasupport.MemoryJavaCompile
 
 data InterpreterClassLoader = native frege.interpreter.javasupport.InterpreterClassLoader where
   native new :: () -> STMutable s InterpreterClassLoader
-              | ClassLoader -> IOMutable InterpreterClassLoader
+              | MutableIO ClassLoader -> IOMutable InterpreterClassLoader
               | Mutable s (JMap String ByteArray) -> STMutable s InterpreterClassLoader
-              | ClassLoader → MutableIO (JMap String ByteArray) -> IOMutable InterpreterClassLoader
+              | MutableIO ClassLoader → MutableIO (JMap String ByteArray) -> IOMutable InterpreterClassLoader
   native classes :: MutableIO InterpreterClassLoader -> IOMutable (JMap String ByteArray)
 
 data JavaCompilationInfo = native frege.interpreter.javasupport.CompilationInfo where
@@ -689,4 +689,4 @@ data Method = pure native java.lang.reflect.Method where
 pure native split :: String -> String -> JArray String
 pure native trim :: String -> String
 
-native asURLClassLoader "(java.net.URLClassLoader)" :: MutableIO InterpreterClassLoader -> IO URLClassLoader
+native asURLClassLoader "(java.net.URLClassLoader)" :: MutableIO InterpreterClassLoader -> IOMutable URLClassLoader
