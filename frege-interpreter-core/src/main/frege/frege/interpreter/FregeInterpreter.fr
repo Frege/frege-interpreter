@@ -500,7 +500,7 @@ typecheckPasses (config :: InterpreterConfig) src = [
 
 derivePass = Instances.pass ()
 
-javacPass :: MutableIO MemoryJavaCompiler -> StringWriter -> StIO (String, Int)
+javacPass :: MutableIO MemoryJavaCompiler -> MutableIO StringWriter -> StIO (String, Int)
 javacPass compiler src = do
   g <- getSTT
   let !packName = g.unpack g.sub.thisPack
@@ -673,10 +673,10 @@ native fieldValue frege.interpreter.javasupport.JavaUtils.fieldValue ::
   String -> String -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 native sandboxFieldValue frege.interpreter.javasupport.JavaUtils.sandboxFieldValue ::
-  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
+  String -> String -> String -> MutableIO StringWriter -> MutableIO StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 native fieldValueWithRuntime frege.interpreter.javasupport.JavaUtils.fieldValueWithRuntime ::
-  String -> String -> String -> StringWriter -> StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
+  String -> String -> String -> MutableIO StringWriter -> MutableIO StringWriter -> MutableIO InterpreterClassLoader -> IO (Maybe Object)
 
 pure native longToString Long.toString :: Long -> Int -> String
 
