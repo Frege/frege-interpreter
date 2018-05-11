@@ -533,10 +533,9 @@ getSymbolType g SymV{typ} = Util.verbose g typ
 getSymbolType g SymD{typ} = Util.verbose g typ
 getSymbolType g SymL{alias} = maybe "" (getSymbolType g) $ g.find alias
 getSymbolType g SymC{name,tau} = show tau.kind
-getSymbolType g SymT{name, nativ = Just n, pur, mutable}
-    | pur       = "pure native " ++ n
-    | mutable   = "mutable native " ++ n
-    | otherwise = "native " ++ n
+getSymbolType g SymT{name, nativ = Just n, pur}
+    | pur       = "immutable native " ++ n
+    | otherwise = "mutable native " ++ n
 getSymbolType g sym
     | sym.{kind?}      = show sym.kind
     | otherwise        = ""
