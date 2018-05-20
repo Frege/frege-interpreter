@@ -1,15 +1,15 @@
-#Frege Interpreter  [![Build Status](https://travis-ci.org/Frege/frege-interpreter.svg)](https://travis-ci.org/Frege/frege-interpreter)
+# Frege Interpreter  [![Build Status](https://travis-ci.org/Frege/frege-interpreter.svg)](https://travis-ci.org/Frege/frege-interpreter)
 
 This is an interpreter for Frege.
 
 Frege REPL and [Online REPL](http://try.frege-lang.org/) make use of this to provide an interactive
 environment on terminal as well as on the browser.
 
-####JSR 223 Scripting support####
+#### JSR 223 Scripting support ####
 
 This project also implements JSR 223, a scripting engine for Frege.
 
-###How to get frege-interpreter?###
+### How to get frege-interpreter? ###
 
 **Build from sources**
 
