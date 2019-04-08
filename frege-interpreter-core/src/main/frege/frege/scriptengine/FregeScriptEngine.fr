@@ -368,7 +368,7 @@ compile !engine !script !context = do
   (res, newState) <- Interpreter.run (interpret script) config state
   createFregeCompiledScript script engine config res newState
 
-compileReader :: MutableIO ScriptEngine -> MutableIO Reader -> MutableIO ScriptContext -> IOMutable CompiledScript
+compileReader :: MutableIO ScriptEngine -> Reader -> MutableIO ScriptContext -> IOMutable CompiledScript
 compileReader !engine !reader !context = do
   bufReader <- BufferedReader.new reader
   lines <- bufReader.getLines

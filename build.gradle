@@ -28,6 +28,19 @@ allprojects {
 
 subprojects {
 
+    def urlFile = { url, name ->
+        File file = new File("$buildDir/download/${name}.jar")
+        file.parentFile.mkdirs()
+        if (!file.exists()) {
+            new URL(url).withInputStream { downloadStream ->
+                file.withOutputStream { fileOut ->
+                    fileOut << downloadStream
+                }
+            }
+        }
+        files(file.absolutePath)
+    }
+    
     apply plugin: "java"
     apply plugin: "groovy"
     apply plugin: "maven"
@@ -38,7 +51,8 @@ subprojects {
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
-        fregeVersion = "3.24-7.100"
+        fregeReleaseName = "3.24public"
+        fregeVersion = "3.24.405"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"
@@ -59,8 +73,7 @@ subprojects {
     }
 
     dependencies {
-		compile files('/home/ingo/Frege/frege/dist/frege3.24-latest.jar')
-		runtime files('/home/ingo/Frege/frege/dist/frege3.24-latest.jar')
+        compile urlFile("https://github.com/Frege/frege/releases/download/$fregeReleaseName/frege${fregeVersion}.jar", "frege${fregeVersion}")
     }
 
     nexusStaging {
