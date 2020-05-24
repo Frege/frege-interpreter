@@ -11,7 +11,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath "gradle.plugin.org.frege-lang:frege-gradle-plugin:0.5"
+        classpath "gradle.plugin.org.frege-lang:frege-gradle-plugin:0.8"
         classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.5.3"
     }
 }
@@ -40,7 +40,7 @@ subprojects {
         }
         files(file.absolutePath)
     }
-    
+
     apply plugin: "java"
     apply plugin: "groovy"
     apply plugin: "maven"
@@ -51,8 +51,8 @@ subprojects {
         isSnapshot = true
         snapshotAppendix = "-SNAPSHOT"
         projectVersion = baseVersion + (isSnapshot ? snapshotAppendix : "")
-        fregeReleaseName = "3.24public"
-        fregeVersion = "3.24.405"
+        fregeReleaseName = "3.25alpha"
+        fregeVersion = "3.25.42"
     }
 
     apply from: "$rootDir/gradle/sonatype.gradle"
