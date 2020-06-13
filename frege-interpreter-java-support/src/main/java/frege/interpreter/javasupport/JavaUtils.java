@@ -101,6 +101,7 @@ public class JavaUtils {
         try {
             System.setSecurityManager(securityManager);
             thread.start();
+            isDisabled.set(true); // dk: this is needed or we run in stackoverflow
             return task.get(timeout, unit);
         } catch (Exception e) {
             isDisabled.set(true);
