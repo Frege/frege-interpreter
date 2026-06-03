@@ -469,7 +469,7 @@ openPrinter pw = do
     return ("file", 1)
 
 javaSourcePasses jw = [
-  (liftStG EA.pass,          "simplify expressions"),            -- TRACE9
+  (EA.pass,                  "simplify expressions"),            -- TRACE9
   (liftStG GL.pass,          "globalize anonymous lambdas"),     -- TRACE8
   (liftStG SC.pass,           "strictness analysis"),
   (openPrinter jw,     "open file"),
