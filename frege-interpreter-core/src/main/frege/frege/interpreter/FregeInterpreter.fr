@@ -45,6 +45,7 @@ import Compiler.passes.Fields()
 import Compiler.passes.TypeAlias()
 import Compiler.passes.Instances()
 import Compiler.passes.Transdef()
+import  Compiler.passes.GenNative()
 import Compiler.Classes()
 import Compiler.Typecheck as TC()
 import Compiler.passes.GlobalLam as GL()
@@ -492,6 +493,7 @@ typecheckPasses (config :: InterpreterConfig) src = [
   (liftStG TypeAlias.pass, "process type aliases"),
   (liftStG derivePass, "derive and enter instances"),
   (Transdef.pass, "resolve names"),
+  (GenNative.pass, "generate native declarations"),
   (liftStG Classes.passC,          "verify class definitions"),        -- TRACE6
   (liftStG $ Classes.passI false,  "verify own instances"),            -- TRACE6
   (liftStG LU.pass,           "simplify lets"),                   -- TRACE7
